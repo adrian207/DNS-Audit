@@ -1,0 +1,113 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                         DNS SCRIPT SUITE OVERVIEW                              ║
+║                                                                                ║
+║  Question: Does ADSite-Audit.ps1 contain all other scripts' functionality?    ║
+║  Answer:   NO - Each script has a unique, specialized purpose                 ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  SCRIPT 1: DNS-Inventory.ps1 (11KB)                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Purpose:     Discover all DNS servers in the domain                         │
+│  Output:      Server list with zones, status, OS version                     │
+│  Use When:    "What DNS servers do I have?"                                  │
+│  Unique:      DC discovery, boot time tracking                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  SCRIPT 2: DNS-Ops-Audit.ps1 (26KB)                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Purpose:     Comprehensive DNS service health testing                       │
+│  Output:      Service status, performance tests, event logs                  │
+│  Use When:    "Is DNS working correctly?"                                    │
+│  Unique:      Service testing, event logs, scavenging audit                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  SCRIPT 3: DNS-Static-Audit.ps1 (9.2KB)                                     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Purpose:     Export all DNS records to CSV                                  │
+│  Output:      Complete record inventory (A, AAAA, CNAME, MX, SRV, etc.)     │
+│  Use When:    "Give me a complete export of all DNS records"                 │
+│  Unique:      All record types, timestamp options                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  SCRIPT 4: DNS-Report.ps1 (19KB)                                            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Purpose:     Simple DNS record export (similar to Static-Audit)             │
+│  Output:      CSV report of DNS records                                      │
+│  Use When:    "Quick record export"                                          │
+│  Unique:      Direct execution, simplified                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  SCRIPT 5: ADSite-Audit.ps1 v2.2 (101KB) ⭐ MOST ADVANCED                    ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Purpose:     Find DNS records where IP is in WRONG AD site                  ║
+║  Output:      Site mismatch report with severity, remediation options        ║
+║  Use When:    "Find site-specific DNS issues"                                ║
+║  Unique:      ✓ Site mismatch detection (ONLY script that does this!)       ║
+║               ✓ IP-to-site mapping                                           ║
+║               ✓ Severity classification                                      ║
+║               ✓ Remediation mode                                             ║
+║               ✓ DNS consistency checks                                       ║
+║               ✓ Zone health scoring                                          ║
+║               ✓ Multi-forest support                                         ║
+║               ✓ CNAME resolution                                             ║
+║               ✓ Reverse lookup validation                                    ║
+║               ✓ Record ownership tracking                                    ║
+║               ✓ Checkpoint/resume capability                                 ║
+║               ✓ Baseline comparison                                          ║
+║               ✓ 20+ enterprise features                                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════════
+                           FUNCTIONALITY MATRIX
+═══════════════════════════════════════════════════════════════════════════════
+
+Feature                     │ Inv │ Ops │ Static │ Report │ ADSite
+────────────────────────────┼─────┼─────┼────────┼────────┼────────
+Server Discovery            │  ✓  │     │        │        │
+Service Health Testing      │     │  ✓  │        │        │   ✓ 
+Complete Record Export      │     │     │   ✓    │   ✓    │
+Site Mismatch Detection     │     │     │        │        │   ✓ *
+IP-to-Site Mapping          │     │     │        │        │   ✓ *
+Remediation Mode            │     │     │        │        │   ✓ *
+Consistency Checking        │     │     │        │        │   ✓ *
+Zone Health Scoring         │     │     │        │        │   ✓ *
+Multi-Forest Support        │     │     │        │        │   ✓ *
+CNAME Resolution            │     │     │        │        │   ✓ *
+Reverse Lookup Validation   │     │     │        │        │   ✓ *
+Record Ownership Tracking   │     │     │        │        │   ✓ *
+Baseline Comparison         │     │     │        │        │   ✓ *
+Checkpoint/Resume           │     │     │        │        │   ✓ *
+Event Log Analysis          │     │  ✓  │        │        │
+Scavenging Audit            │     │  ✓  │        │        │
+All Record Types Export     │     │     │   ✓    │   ✓    │
+
+* = Features UNIQUE to ADSite-Audit.ps1
+
+═══════════════════════════════════════════════════════════════════════════════
+                              RECOMMENDATION
+═══════════════════════════════════════════════════════════════════════════════
+
+✓ KEEP ALL SCRIPTS - They serve different purposes and complement each other
+
+✗ DO NOT consolidate - Each has unique, specialized functionality
+
+IDEAL WORKFLOW:
+  1. DNS-Inventory.ps1      → Discover servers
+  2. DNS-Ops-Audit.ps1      → Check health
+  3. DNS-Static-Audit.ps1   → Export baseline
+  4. ADSite-Audit.ps1       → Find site issues (unique specialty!)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Summary: ADSite-Audit.ps1 is NOT a replacement for other scripts.
+         It's a SPECIALIZED tool for site mismatch detection.
+         Think: "Swiss Army Knife" vs "Precision Surgical Tool"
+         Other scripts = General purpose (Swiss Army Knife)
+         ADSite-Audit = Specialized for ONE thing, but does it extremely well
+
+═══════════════════════════════════════════════════════════════════════════════
