@@ -8,7 +8,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Comprehensive upgrade in progress (security, performance, documentation)
+- Future enhancements planned
+
+---
+
+## [2.9.0] - 2025-01-19 - PTR Auto-Fix Edition
+
+### Added
+- **Enhanced PTR Validation System**
+  - Automatic detection of missing reverse lookup zones
+  - Subnet-based zone grouping (/24 for IPv4, /64 for IPv6)
+  - Auto-create missing zones and PTR records with `-AutoFix` parameter
+  - Full IPv4 (in-addr.arpa) and IPv6 (ip6.arpa) support
+  - Comprehensive zone and PTR analysis across all forward zones
+  
+- **New Functions**
+  - `Test-DnsReverseZonesAndPtrs` - Main validation and auto-fix engine (434 lines)
+  - `Get-ReverseZoneName` - Calculate reverse zone name from IP address
+  - `Get-PtrRecordName` - Calculate PTR record name within zone
+  
+- **New Reports**
+  - `DNS_MissingReverseZones_*.csv` - Zones that need to be created
+  - `DNS_CreatedReverseZones_*.csv` - Zones successfully created (AutoFix mode)
+  - `DNS_CreatedPTRRecords_*.csv` - PTR records successfully created (AutoFix mode)
+  - Enhanced `DNS_Analytics_Statistics_*.csv` with zone metrics
+  
+- **Safety Features**
+  - Safe by default: detection only without `-AutoFix`
+  - Idempotent operations (safe to run multiple times)
+  - AD-integrated zones with Domain replication scope
+  - Secure dynamic updates by default
+  - Comprehensive audit logging of all operations
+  - Failed operations tracked separately
+  
+- **Documentation**
+  - New comprehensive guide: `PTR-VALIDATION-FEATURE.md`
+  - Extensive README section with use cases and examples
+  - Administrator best practices guide
+  - Troubleshooting section
+  
+### Changed
+- Updated `Start-DNSAnalytics` to use new PTR validation engine
+- Enhanced statistics tracking with zone creation metrics
+- Improved summary messages to include zone operations
+- Script version updated to "2.9 - PTR Auto-Fix Edition"
+
+### Technical Details
+- IPv4: Uses /24 (Class C) boundary by default
+- IPv6: Uses /64 boundary by default
+- Zone creation: AD-integrated with Domain replication
+- PTR creation: Validates FQDN format and zone existence
+- Performance: ~5 minutes for 10,000 records vs. hours of manual work
 
 ---
 

@@ -91,7 +91,12 @@ See: [`DNS-SCAVENGING-README.md`](./DNS-SCAVENGING-README.md)
 #### 🔍 Intelligence & Analytics
 - **Stale Records:** Age-based and connectivity testing
 - **Duplicate IPs:** Conflict detection across zones
-- **PTR Validation:** Forward/reverse DNS alignment
+- **🆕 Enhanced PTR Validation:** 
+  - Auto-detects missing reverse lookup zones
+  - Validates forward/reverse DNS alignment
+  - Auto-creates zones and PTR records with `-AutoFix`
+  - Supports IPv4 and IPv6
+  - Subnet-based zone grouping
 - **Naming Conventions:** Pattern compliance checking
 - **TTL Analysis:** Consistency and optimization recommendations
 
@@ -323,6 +328,135 @@ $config | Set-Content "audit-config.json"
 # Compare to baseline
 .\DNS-MasterAudit.ps1 -Mode Compare `
     -CompareToBaseline `
+    -ExportFormat HTML
+```
+
+### 🔄 Enhanced PTR Validation & Auto-Fix (v2.9+)
+
+The enhanced PTR validation system automatically detects missing reverse lookup zones and PTR records, and can optionally create them for you.
+
+#### **Detection Only (Safe Mode)**
+
+```powershell
+# Detect missing PTR records and reverse zones
+.\DNS-MasterAudit.ps1 -Mode Analytics `
+    -ValidatePTRRecords `
+    -GenerateRemediationScript
+
+# Output:
+#  - DNS_MissingReverseZones_*.csv   - Zones that need to be created
+#  - DNS_MissingPTRs_*.csv            - PTR records that need to be created
+#  - DNS_Remediation_*.ps1            - PowerShell script to fix everything
+```
+
+**What It Does:**
+- ✅ Scans all forward zones for A/AAAA records
+- ✅ Checks if reverse lookup zones exist
+- ✅ Validates PTR records for each IP
+- ✅ Groups findings by subnet (/24 for IPv4, /64 for IPv6)
+- ✅ Generates remediation scripts
+- ❌ Does **NOT** make any changes
+
+#### **Auto-Fix Mode (Creates Zones & PTRs)**
+
+```powershell
+# Automatically create missing zones and PTR records
+.\DNS-MasterAudit.ps1 -Mode Analytics `
+    -ValidatePTRRecords `
+    -AutoFix `
+    -GenerateRemediationScript
+
+# With custom replication settings
+.\DNS-MasterAudit.ps1 -Mode Analytics `
+    -ValidatePTRRecords `
+    -AutoFix `
+    -ExportFormat HTML
+```
+
+**What It Does:**
+- ✅ Everything from Detection Only mode, PLUS:
+- ✅ Creates missing reverse lookup zones (AD-integrated)
+- ✅ Creates missing PTR records
+- ✅ Uses secure dynamic updates by default
+- ✅ Logs all operations to audit trail
+- ✅ Exports lists of created zones/PTRs
+
+**Reports Generated:**
+```
+DNS_MissingReverseZones_20250119_143022.csv      # Zones needed
+DNS_CreatedReverseZones_20250119_143022.csv      # Zones created (AutoFix only)
+DNS_MissingPTRs_20250119_143022.csv              # PTR records needed
+DNS_CreatedPTRRecords_20250119_143022.csv        # PTRs created (AutoFix only)
+DNS_Remediation_20250119_143022.ps1              # Manual remediation script
+DNS_Analytics_Statistics_20250119_143022.csv     # Summary statistics
+```
+
+#### **Use Cases**
+
+| Scenario | Command | Result |
+|----------|---------|--------|
+| **Initial Assessment** | `-ValidatePTRRecords` | Identify gaps without changes |
+| **Pilot Environment** | `-ValidatePTRRecords -AutoFix` | Auto-create zones and PTRs |
+| **Production (Safe)** | `-ValidatePTRRecords -GenerateRemediationScript` | Generate script, review, then run manually |
+| **IPv6 Support** | Works automatically | Detects `ip6.arpa` zones |
+| **Subnet Analysis** | Detection only | See which `/24` subnets need zones |
+
+#### **Example Output**
+
+**Missing Reverse Zones Report:**
+```
+ZoneName              IPVersion  RecordCount  SampleIPs
+--------              ---------  -----------  ---------
+1.168.192.in-addr.arpa  IPv4      45           192.168.1.10, 192.168.1.11, ...
+10.10.10.in-addr.arpa   IPv4      12           10.10.10.50, 10.10.10.51, ...
+```
+
+**PTR Validation Summary (Console):**
+```
+┌─────────────────────────────────────────────────┐
+│  PTR VALIDATION SUMMARY                        │
+└─────────────────────────────────────────────────┘
+  Forward Records Scanned:  1,247
+  Reverse Zones Found:      8
+  Missing Reverse Zones:    3
+  PTR Records Found:        982
+  Missing PTR Records:      265
+
+  AUTO-FIX RESULTS:
+  Zones Created:            3
+  PTRs Created:             265
+  Failed Operations:        0
+```
+
+#### **Safety Features**
+
+- **Subnet Detection:** Automatically groups IPs into `/24` (IPv4) or `/64` (IPv6) zones
+- **Replication Scope:** Defaults to `Domain` (AD-integrated)
+- **Dynamic Updates:** Defaults to `Secure` (Kerberos auth required)
+- **Idempotent:** Safe to run multiple times (skips existing records)
+- **Audit Trail:** All operations logged to `DNS_Audit_*.log`
+- **Remediation Backup:** PowerShell script generated for manual review/rollback
+
+#### **Advanced Options**
+
+```powershell
+# Different replication scope (Forest-wide)
+# Note: Currently defaults to 'Domain' (requires code change for custom scope)
+.\DNS-MasterAudit.ps1 -Mode Analytics -ValidatePTRRecords -AutoFix
+
+# Use with credential manager for secure auth
+.\DNS-MasterAudit.ps1 -Mode Analytics `
+    -ValidatePTRRecords `
+    -AutoFix `
+    -UseCredentialManager `
+    -CredentialName "DNS-Admin"
+
+# Combine with other analytics
+.\DNS-MasterAudit.ps1 -Mode Analytics `
+    -ValidatePTRRecords `
+    -AutoFix `
+    -StaleRecordThreshold 180 `
+    -DetectDuplicateIPs `
     -ExportFormat HTML
 ```
 

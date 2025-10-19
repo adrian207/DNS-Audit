@@ -2,7 +2,7 @@
 # DNS Master Audit Script - ENTERPRISE EDITION
 # Author: Adrian Johnson <adrian207@gmail.com>
 # Created: 2025
-# Version: 2.8 - UI Enhanced Edition
+# Version: 2.9 - PTR Auto-Fix Edition
 ## Description: All-in-one DNS auditing tool - NO EXTERNAL DEPENDENCIES
 #              1. DNS Inventory (server discovery)
 #              2. DNS Health Check (service testing)
@@ -11,10 +11,17 @@
 #              5. Complete Audit (all of the above)
 #              6. Baseline Mode (snapshot for change tracking)
 #              7. Compare Mode (detect configuration drift)
-#              8. Analytics Mode (stale records, duplicates, PTR validation)
+#              8. Analytics Mode (stale records, duplicates, enhanced PTR validation)
 #              9. Security Mode (DNSSEC, zone transfer audits)
 #              10. Diagnostics Mode (performance, replication lag, cross-site auth)
-## NEW in v2.8: UI Enhancements
+## NEW in v2.9: Enhanced PTR Validation & Auto-Fix
+#              - Automatic detection of missing reverse lookup zones
+#              - Subnet-based zone grouping (/24 for IPv4, /64 for IPv6)
+#              - Auto-create missing zones and PTR records with -AutoFix
+#              - IPv4 (in-addr.arpa) and IPv6 (ip6.arpa) support
+#              - Detailed reports: missing zones, missing PTRs, created items
+#              - Safe by default: detection only without -AutoFix
+## v2.8: UI Enhancements
 #              - Interactive mode selection menu (when -Mode not specified)
 #              - Enhanced progress indicators with ETA and throughput
 #              - Executive summary dashboard at completion
@@ -36,7 +43,10 @@
 #              - Compliance modes (HIPAA, PCI-DSS, GDPR, FedRAMP)
 #              - Enhanced security logging and validation
 ## v2.5 Features: Enterprise Features
-#              - Advanced analytics (stale records, duplicate IPs, PTR validation)
+#              - Advanced analytics (stale records, duplicate IPs, enhanced PTR validation)
+#              - PTR validation: Auto-detect missing reverse zones & PTR records
+#              - PTR auto-fix: Create missing zones & PTRs with -AutoFix parameter
+#              - Supports both IPv4 (in-addr.arpa) and IPv6 (ip6.arpa)
 #              - Security audits (DNSSEC validation, zone transfer checks)
 #              - Enhanced diagnostics (query performance, replication lag)
 #              - Remediation script generation (automated fix scripts)
@@ -498,7 +508,7 @@ param(
 )
 
 #region Script Variables
-$script:Version = "2.8 - UI Enhanced Edition"
+$script:Version = "2.9 - PTR Auto-Fix Edition"
 $script:StartTime = Get-Date
 $script:TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $script:LogPath = ""
@@ -2056,6 +2066,533 @@ function Get-DnsRecordsBatched {
     
     Write-AuditLog "Total records retrieved: $($allRecords.Count)" -Level SUCCESS
     return $allRecords
+}
+
+<#
+.SYNOPSIS
+    Enhanced PTR validation with automatic zone detection and creation
+
+.DESCRIPTION
+    Validates PTR records, detects missing reverse zones, and can auto-create them.
+    - Scans forward zones for A/AAAA records
+    - Checks if reverse zones exist
+    - Detects missing PTR records
+    - Groups by subnet for efficient zone creation
+    - Supports auto-fix mode to create zones and PTRs
+    - Handles both IPv4 (in-addr.arpa) and IPv6 (ip6.arpa)
+
+.PARAMETER DnsServers
+    Array of DNS servers to audit
+
+.PARAMETER Credential
+    Credentials for remote DNS servers
+
+.PARAMETER AutoFix
+    Automatically create missing zones and PTR records
+
+.PARAMETER ReplicationScope
+    Replication scope for new reverse zones (Domain, Forest, Legacy, Custom)
+
+.PARAMETER DynamicUpdate
+    Dynamic update setting for new zones (None, NonSecure, Secure)
+
+.OUTPUTS
+    Hashtable with MissingPTRs, MissingZones, CreatedZones, CreatedPTRs
+#>
+function Test-DnsReverseZonesAndPtrs {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$DnsServers,
+        
+        [Parameter()]
+        [PSCredential]$Credential,
+        
+        [Parameter()]
+        [switch]$AutoFix,
+        
+        [Parameter()]
+        [ValidateSet('Domain', 'Forest', 'Legacy', 'Custom')]
+        [string]$ReplicationScope = 'Domain',
+        
+        [Parameter()]
+        [ValidateSet('None', 'NonSecure', 'Secure')]
+        [string]$DynamicUpdate = 'Secure'
+    )
+    
+    Write-AuditLog "=== ENHANCED PTR VALIDATION ===" -Level INFO
+    Write-AuditLog "Checking reverse DNS zones and PTR records..." -Level INFO
+    
+    $results = @{
+        MissingPTRs = @()
+        MissingZones = @()
+        CreatedZones = @()
+        CreatedPTRs = @()
+        FailedOperations = @()
+        Statistics = @{
+            ForwardRecordsScanned = 0
+            ReverseZonesFound = 0
+            PTRsFound = 0
+            PTRsMissing = 0
+            ZonesMissing = 0
+            ZonesCreated = 0
+            PTRsCreated = 0
+        }
+    }
+    
+    try {
+        # Step 1: Get all forward zones and A/AAAA records
+        Write-AuditLog "Step 1: Scanning forward zones for A/AAAA records..." -Level INFO
+        $forwardRecords = @()
+        
+        foreach ($server in $DnsServers) {
+            try {
+                $zoneParams = @{
+                    ComputerName = $server
+                    ErrorAction = 'Stop'
+                }
+                if ($Credential) { $zoneParams['Credential'] = $Credential }
+                
+                $zones = Get-DnsServerZone @zoneParams | Where-Object { 
+                    -not $_.IsAutoCreated -and 
+                    -not $_.IsReverseLookupZone -and
+                    $_.ZoneType -in @('Primary', 'AD-Integrated')
+                }
+                
+                foreach ($zone in $zones) {
+                    $recordParams = @{
+                        ZoneName = $zone.ZoneName
+                        ComputerName = $server
+                        ErrorAction = 'SilentlyContinue'
+                    }
+                    if ($Credential) { $recordParams['Credential'] = $Credential }
+                    
+                    # Get A records
+                    $aRecords = Get-DnsServerResourceRecord @recordParams -RRType A
+                    foreach ($record in $aRecords) {
+                        if ($record.RecordData.IPv4Address) {
+                            $forwardRecords += [PSCustomObject]@{
+                                Server = $server
+                                Zone = $zone.ZoneName
+                                RecordName = $record.HostName
+                                FQDN = if ($record.HostName -eq '@') { $zone.ZoneName } else { "$($record.HostName).$($zone.ZoneName)" }
+                                IPAddress = $record.RecordData.IPv4Address.ToString()
+                                IPVersion = 'IPv4'
+                            }
+                        }
+                    }
+                    
+                    # Get AAAA records
+                    $aaaaRecords = Get-DnsServerResourceRecord @recordParams -RRType AAAA
+                    foreach ($record in $aaaaRecords) {
+                        if ($record.RecordData.IPv6Address) {
+                            $forwardRecords += [PSCustomObject]@{
+                                Server = $server
+                                Zone = $zone.ZoneName
+                                RecordName = $record.HostName
+                                FQDN = if ($record.HostName -eq '@') { $zone.ZoneName } else { "$($record.HostName).$($zone.ZoneName)" }
+                                IPAddress = $record.RecordData.IPv6Address.ToString()
+                                IPVersion = 'IPv6'
+                            }
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-AuditLog "Failed to query zones on ${server}: $_" -Level ERROR
+                $results.FailedOperations += "Zone query failed on ${server}: $_"
+            }
+        }
+        
+        $results.Statistics.ForwardRecordsScanned = $forwardRecords.Count
+        Write-AuditLog "Found $($forwardRecords.Count) forward DNS records (A/AAAA)" -Level SUCCESS
+        
+        if ($forwardRecords.Count -eq 0) {
+            Write-AuditLog "No forward records to validate" -Level WARNING
+            return $results
+        }
+        
+        # Step 2: Get all reverse lookup zones
+        Write-AuditLog "Step 2: Discovering existing reverse lookup zones..." -Level INFO
+        $reverseZones = @{}
+        
+        foreach ($server in $DnsServers) {
+            try {
+                $zoneParams = @{
+                    ComputerName = $server
+                    ErrorAction = 'Stop'
+                }
+                if ($Credential) { $zoneParams['Credential'] = $Credential }
+                
+                $zones = Get-DnsServerZone @zoneParams | Where-Object { $_.IsReverseLookupZone }
+                
+                foreach ($zone in $zones) {
+                    if (-not $reverseZones.ContainsKey($zone.ZoneName)) {
+                        $reverseZones[$zone.ZoneName] = @{
+                            ZoneName = $zone.ZoneName
+                            Servers = @($server)
+                            ZoneType = $zone.ZoneType
+                            ReplicationScope = $zone.ReplicationScope
+                        }
+                    }
+                    else {
+                        $reverseZones[$zone.ZoneName].Servers += $server
+                    }
+                }
+            }
+            catch {
+                Write-AuditLog "Failed to query reverse zones on ${server}: $_" -Level ERROR
+            }
+        }
+        
+        $results.Statistics.ReverseZonesFound = $reverseZones.Count
+        Write-AuditLog "Found $($reverseZones.Count) reverse lookup zones" -Level SUCCESS
+        
+        # Step 3: Determine required reverse zones based on IP addresses
+        Write-AuditLog "Step 3: Analyzing required reverse zones..." -Level INFO
+        $requiredZones = @{}
+        
+        foreach ($record in $forwardRecords) {
+            $reverseZoneName = Get-ReverseZoneName -IPAddress $record.IPAddress -IPVersion $record.IPVersion
+            
+            if ($reverseZoneName) {
+                if (-not $requiredZones.ContainsKey($reverseZoneName)) {
+                    $requiredZones[$reverseZoneName] = @{
+                        ZoneName = $reverseZoneName
+                        IPVersion = $record.IPVersion
+                        Records = @()
+                    }
+                }
+                $requiredZones[$reverseZoneName].Records += $record
+            }
+        }
+        
+        Write-AuditLog "Analysis complete: $($requiredZones.Count) reverse zones required" -Level SUCCESS
+        
+        # Step 4: Identify missing reverse zones
+        Write-AuditLog "Step 4: Identifying missing reverse zones..." -Level INFO
+        
+        foreach ($zoneName in $requiredZones.Keys) {
+            if (-not $reverseZones.ContainsKey($zoneName)) {
+                $missingZone = [PSCustomObject]@{
+                    ZoneName = $zoneName
+                    IPVersion = $requiredZones[$zoneName].IPVersion
+                    RecordCount = $requiredZones[$zoneName].Records.Count
+                    SampleIPs = ($requiredZones[$zoneName].Records | Select-Object -First 5 -ExpandProperty IPAddress) -join ', '
+                    RemediationCommand = "Add-DnsServerPrimaryZone -NetworkID '$zoneName' -ReplicationScope $ReplicationScope -DynamicUpdate $DynamicUpdate"
+                }
+                
+                $results.MissingZones += $missingZone
+                $results.Statistics.ZonesMissing++
+                
+                # Auto-create zone if enabled
+                if ($AutoFix) {
+                    Write-AuditLog "  AUTO-FIX: Creating reverse zone: $zoneName" -Level INFO
+                    
+                    foreach ($server in $DnsServers | Select-Object -First 1) {  # Create on first server only
+                        try {
+                            $createParams = @{
+                                ComputerName = $server
+                                NetworkID = $zoneName.Replace('.in-addr.arpa', '').Replace('.ip6.arpa', '')
+                                ReplicationScope = $ReplicationScope
+                                DynamicUpdate = $DynamicUpdate
+                                ErrorAction = 'Stop'
+                            }
+                            if ($Credential) { $createParams['Credential'] = $Credential }
+                            
+                            Add-DnsServerPrimaryZone @createParams
+                            
+                            $results.CreatedZones += [PSCustomObject]@{
+                                ZoneName = $zoneName
+                                Server = $server
+                                ReplicationScope = $ReplicationScope
+                                DynamicUpdate = $DynamicUpdate
+                                CreatedAt = Get-Date
+                            }
+                            
+                            # Add to reverseZones so PTRs can be created
+                            $reverseZones[$zoneName] = @{
+                                ZoneName = $zoneName
+                                Servers = @($server)
+                            }
+                            
+                            $results.Statistics.ZonesCreated++
+                            Write-AuditLog "  ✓ Created reverse zone: $zoneName on $server" -Level SUCCESS
+                            
+                            # Add remediation command for reference
+                            if ($script:GenerateRemediationScript) {
+                                Add-RemediationCommand `
+                                    -Issue "Missing reverse zone: $zoneName" `
+                                    -Command $missingZone.RemediationCommand `
+                                    -Description "[AUTO-FIXED] Created reverse zone for $($requiredZones[$zoneName].Records.Count) records"
+                            }
+                        }
+                        catch {
+                            Write-AuditLog "  ✗ Failed to create reverse zone $zoneName on ${server}: $_" -Level ERROR
+                            $results.FailedOperations += "Zone creation failed ($zoneName on ${server}): $_"
+                            
+                            # Still add to remediation for manual fix
+                            if ($script:GenerateRemediationScript) {
+                                Add-RemediationCommand `
+                                    -Issue "Missing reverse zone: $zoneName" `
+                                    -Command $missingZone.RemediationCommand `
+                                    -Description "Reverse zone required for $($requiredZones[$zoneName].Records.Count) PTR records"
+                            }
+                        }
+                    }
+                }
+                else {
+                    # Just add to remediation script
+                    if ($script:GenerateRemediationScript) {
+                        Add-RemediationCommand `
+                            -Issue "Missing reverse zone: $zoneName" `
+                            -Command $missingZone.RemediationCommand `
+                            -Description "Reverse zone required for $($requiredZones[$zoneName].Records.Count) PTR records"
+                    }
+                }
+            }
+        }
+        
+        if ($results.MissingZones.Count -gt 0) {
+            Write-AuditLog "Found $($results.MissingZones.Count) missing reverse zones" -Level WARNING
+        }
+        else {
+            Write-AuditLog "All required reverse zones exist" -Level SUCCESS
+        }
+        
+        # Step 5: Validate PTR records
+        Write-AuditLog "Step 5: Validating PTR records..." -Level INFO
+        
+        foreach ($record in $forwardRecords) {
+            $reverseZoneName = Get-ReverseZoneName -IPAddress $record.IPAddress -IPVersion $record.IPVersion
+            
+            if (-not $reverseZones.ContainsKey($reverseZoneName)) {
+                # Zone doesn't exist - already handled in Step 4
+                continue
+            }
+            
+            # Check if PTR exists
+            $ptrExists = $false
+            $ptrName = Get-PtrRecordName -IPAddress $record.IPAddress -IPVersion $record.IPVersion
+            
+            foreach ($server in $reverseZones[$reverseZoneName].Servers) {
+                try {
+                    $ptrParams = @{
+                        ZoneName = $reverseZoneName
+                        ComputerName = $server
+                        Name = $ptrName
+                        RRType = 'PTR'
+                        ErrorAction = 'SilentlyContinue'
+                    }
+                    if ($Credential) { $ptrParams['Credential'] = $Credential }
+                    
+                    $ptr = Get-DnsServerResourceRecord @ptrParams
+                    if ($ptr -and $ptr.RecordData.PtrDomainName -like "*$($record.FQDN)*") {
+                        $ptrExists = $true
+                        $results.Statistics.PTRsFound++
+                        break
+                    }
+                }
+                catch {
+                    # Silently continue
+                }
+            }
+            
+            if (-not $ptrExists) {
+                $missingPtr = [PSCustomObject]@{
+                    ForwardZone = $record.Zone
+                    FQDN = $record.FQDN
+                    IPAddress = $record.IPAddress
+                    IPVersion = $record.IPVersion
+                    ReverseZone = $reverseZoneName
+                    PTRName = $ptrName
+                    Server = $record.Server
+                    RemediationCommand = "Add-DnsServerResourceRecordPtr -ComputerName '$($record.Server)' -ZoneName '$reverseZoneName' -Name '$ptrName' -PtrDomainName '$($record.FQDN)'"
+                }
+                
+                $results.MissingPTRs += $missingPtr
+                $results.Statistics.PTRsMissing++
+                
+                # Auto-create PTR if enabled
+                if ($AutoFix -and $reverseZones.ContainsKey($reverseZoneName)) {
+                    $targetServer = $reverseZones[$reverseZoneName].Servers | Select-Object -First 1
+                    
+                    try {
+                        $createPtrParams = @{
+                            ComputerName = $targetServer
+                            ZoneName = $reverseZoneName
+                            Name = $ptrName
+                            PtrDomainName = $record.FQDN
+                            ErrorAction = 'Stop'
+                        }
+                        if ($Credential) { $createPtrParams['Credential'] = $Credential }
+                        
+                        Add-DnsServerResourceRecordPtr @createPtrParams
+                        
+                        $results.CreatedPTRs += [PSCustomObject]@{
+                            FQDN = $record.FQDN
+                            IPAddress = $record.IPAddress
+                            ReverseZone = $reverseZoneName
+                            PTRName = $ptrName
+                            Server = $targetServer
+                            CreatedAt = Get-Date
+                        }
+                        
+                        $results.Statistics.PTRsCreated++
+                        
+                        # Add to remediation log as "auto-fixed"
+                        if ($script:GenerateRemediationScript) {
+                            Add-RemediationCommand `
+                                -Issue "Missing PTR for $($record.FQDN) ($($record.IPAddress))" `
+                                -Command $missingPtr.RemediationCommand `
+                                -Description "[AUTO-FIXED] Created PTR record"
+                        }
+                    }
+                    catch {
+                        Write-AuditLog "  ✗ Failed to create PTR for $($record.FQDN) ($($record.IPAddress)): $_" -Level ERROR
+                        $results.FailedOperations += "PTR creation failed ($($record.FQDN)): $_"
+                        
+                        # Add to remediation for manual fix
+                        if ($script:GenerateRemediationScript) {
+                            Add-RemediationCommand `
+                                -Issue "Missing PTR for $($record.FQDN) ($($record.IPAddress))" `
+                                -Command $missingPtr.RemediationCommand `
+                                -Description "Failed auto-fix, manual intervention required"
+                        }
+                    }
+                }
+                else {
+                    # Just add to remediation script
+                    if ($script:GenerateRemediationScript) {
+                        Add-RemediationCommand `
+                            -Issue "Missing PTR for $($record.FQDN) ($($record.IPAddress))" `
+                            -Command $missingPtr.RemediationCommand `
+                            -Description "Create reverse DNS pointer"
+                    }
+                }
+            }
+        }
+        
+        Write-AuditLog "PTR validation complete: $($results.Statistics.PTRsFound) exist, $($results.Statistics.PTRsMissing) missing" -Level $(if ($results.Statistics.PTRsMissing -gt 0) { "WARNING" } else { "SUCCESS" })
+        
+        # Summary
+        Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor Cyan
+        Write-Host "│  PTR VALIDATION SUMMARY                        │" -ForegroundColor Cyan
+        Write-Host "└─────────────────────────────────────────────────┘" -ForegroundColor Cyan
+        Write-Host "  Forward Records Scanned:  $($results.Statistics.ForwardRecordsScanned)" -ForegroundColor White
+        Write-Host "  Reverse Zones Found:      $($results.Statistics.ReverseZonesFound)" -ForegroundColor $(if ($results.Statistics.ReverseZonesFound -gt 0) { "Green" } else { "Yellow" })
+        Write-Host "  Missing Reverse Zones:    $($results.Statistics.ZonesMissing)" -ForegroundColor $(if ($results.Statistics.ZonesMissing -gt 0) { "Red" } else { "Green" })
+        Write-Host "  PTR Records Found:        $($results.Statistics.PTRsFound)" -ForegroundColor Green
+        Write-Host "  Missing PTR Records:      $($results.Statistics.PTRsMissing)" -ForegroundColor $(if ($results.Statistics.PTRsMissing -gt 0) { "Red" } else { "Green" })
+        
+        if ($AutoFix) {
+            Write-Host "`n  AUTO-FIX RESULTS:" -ForegroundColor Yellow
+            Write-Host "  Zones Created:            $($results.Statistics.ZonesCreated)" -ForegroundColor $(if ($results.Statistics.ZonesCreated -gt 0) { "Green" } else { "Gray" })
+            Write-Host "  PTRs Created:             $($results.Statistics.PTRsCreated)" -ForegroundColor $(if ($results.Statistics.PTRsCreated -gt 0) { "Green" } else { "Gray" })
+            Write-Host "  Failed Operations:        $($results.FailedOperations.Count)" -ForegroundColor $(if ($results.FailedOperations.Count -gt 0) { "Red" } else { "Gray" })
+        }
+        Write-Host ""
+        
+    }
+    catch {
+        Write-AuditLog "PTR validation failed: $($_.Exception.Message)" -Level ERROR
+        throw
+    }
+    
+    return $results
+}
+
+<#
+.SYNOPSIS
+    Helper function to calculate reverse zone name from IP address
+#>
+function Get-ReverseZoneName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$IPAddress,
+        
+        [Parameter(Mandatory)]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string]$IPVersion
+    )
+    
+    if ($IPVersion -eq 'IPv4') {
+        # For IPv4, use /24 (Class C) by default
+        $octets = $IPAddress.Split('.')
+        if ($octets.Count -eq 4) {
+            # Return /24 zone: e.g., 192.168.1.0 → 1.168.192.in-addr.arpa
+            return "$($octets[2]).$($octets[1]).$($octets[0]).in-addr.arpa"
+        }
+    }
+    elseif ($IPVersion -eq 'IPv6') {
+        # For IPv6, use /64 by default
+        try {
+            $ip = [System.Net.IPAddress]::Parse($IPAddress)
+            $bytes = $ip.GetAddressBytes()
+            
+            # Take first 8 bytes (64 bits)
+            $nibbles = @()
+            for ($i = 0; $i -lt 8; $i++) {
+                $nibbles += [Convert]::ToString($bytes[$i], 16).PadLeft(2, '0').ToCharArray() | ForEach-Object { $_ }
+            }
+            
+            # Reverse and join with dots
+            [array]::Reverse($nibbles)
+            return ($nibbles -join '.') + '.ip6.arpa'
+        }
+        catch {
+            Write-AuditLog "Failed to parse IPv6 address: $IPAddress" -Level WARNING
+            return $null
+        }
+    }
+    
+    return $null
+}
+
+<#
+.SYNOPSIS
+    Helper function to get PTR record name from IP address
+#>
+function Get-PtrRecordName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$IPAddress,
+        
+        [Parameter(Mandatory)]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string]$IPVersion
+    )
+    
+    if ($IPVersion -eq 'IPv4') {
+        # For IPv4 /24 zone, return last octet
+        $octets = $IPAddress.Split('.')
+        if ($octets.Count -eq 4) {
+            return $octets[3]
+        }
+    }
+    elseif ($IPVersion -eq 'IPv6') {
+        # For IPv6, return nibbles after zone prefix
+        try {
+            $ip = [System.Net.IPAddress]::Parse($IPAddress)
+            $bytes = $ip.GetAddressBytes()
+            
+            # Take last 8 bytes (last 64 bits)
+            $nibbles = @()
+            for ($i = 8; $i -lt 16; $i++) {
+                $nibbles += [Convert]::ToString($bytes[$i], 16).PadLeft(2, '0').ToCharArray() | ForEach-Object { $_ }
+            }
+            
+            # Reverse and join
+            [array]::Reverse($nibbles)
+            return $nibbles -join '.'
+        }
+        catch {
+            Write-AuditLog "Failed to parse IPv6 address: $IPAddress" -Level WARNING
+            return $null
+        }
+    }
+    
+    return $null
 }
 
 #endregion
@@ -3814,42 +4351,40 @@ function Start-DNSAnalytics {
             Write-AuditLog "Found $($ipGroups.Count) duplicate IP addresses" -Level $(if ($ipGroups.Count -gt 0) { "WARNING" } else { "SUCCESS" })
         }
         
-        # Analyze 3: PTR Record Validation
+        # Analyze 3: Enhanced PTR Record Validation (v2.8+)
         if ($ValidatePTRRecords) {
-            Write-AuditLog "Validating PTR records..." -Level INFO
+            Write-AuditLog "Running enhanced PTR validation (includes zone detection)..." -Level INFO
             
-            $aRecords = $allRecords | Where-Object { $_.Type -eq "A" }
-            $ptrRecords = $allRecords | Where-Object { $_.Type -eq "PTR" }
+            $ptrValidation = Test-DnsReverseZonesAndPtrs `
+                -DnsServers $allDnsServers `
+                -Credential $Credential `
+                -AutoFix:$AutoFix `
+                -ReplicationScope 'Domain' `
+                -DynamicUpdate 'Secure'
             
-            foreach ($aRecord in $aRecords) {
-                $ip = $aRecord.Data.IPv4Address
-                if (-not $ip) { continue }
-                
-                # Check if PTR exists
-                $reverseName = ($ip.Split('.')[3..0] -join '.') + ".in-addr.arpa"
-                $ptrExists = $ptrRecords | Where-Object { $_.Zone -like "*in-addr.arpa" -and $_.Data.PtrDomainName -like "*$($aRecord.Name)*" }
-                
-                if (-not $ptrExists) {
-                    $analytics.MissingPTRs += [PSCustomObject]@{
-                        ForwardName = "$($aRecord.Name).$($aRecord.Zone)"
-                        IPAddress = $ip
-                        ReverseLookupZone = $reverseName
-                        Server = $aRecord.Server
-                    }
-                    
-                    # Add remediation command
-                    if ($GenerateRemediationScript) {
-                        $reverseZone = ($ip.Split('.')[0..2] -join '.') + ".in-addr.arpa"
-                        $ptrName = $ip.Split('.')[3]
-                        Add-RemediationCommand `
-                            -Issue "Missing PTR record for $($aRecord.Name).$($aRecord.Zone) ($ip)" `
-                            -Command "Add-DnsServerResourceRecordPtr -ComputerName '$($aRecord.Server)' -ZoneName '$reverseZone' -Name '$ptrName' -PtrDomainName '$($aRecord.Name).$($aRecord.Zone)'" `
-                            -Description "Create reverse DNS pointer for $ip"
-                    }
-                }
+            # Store results for export
+            $analytics.MissingPTRs = $ptrValidation.MissingPTRs
+            $analytics.MissingZones = $ptrValidation.MissingZones
+            $analytics.CreatedZones = $ptrValidation.CreatedZones
+            $analytics.CreatedPTRs = $ptrValidation.CreatedPTRs
+            $analytics.PTRStatistics = $ptrValidation.Statistics
+            
+            # Export missing zones
+            if ($ptrValidation.MissingZones.Count -gt 0) {
+                Export-AuditData -Data $ptrValidation.MissingZones -BaseFileName "DNS_MissingReverseZones_${script:TimeStamp}" -Format $ExportFormat -Title "Missing Reverse Lookup Zones"
             }
             
-            Write-AuditLog "Found $($analytics.MissingPTRs.Count) missing PTR records" -Level $(if ($analytics.MissingPTRs.Count -gt 0) { "WARNING" } else { "SUCCESS" })
+            # Export created zones (if any)
+            if ($ptrValidation.CreatedZones.Count -gt 0) {
+                Export-AuditData -Data $ptrValidation.CreatedZones -BaseFileName "DNS_CreatedReverseZones_${script:TimeStamp}" -Format $ExportFormat -Title "Auto-Created Reverse Zones"
+            }
+            
+            # Export created PTRs (if any)
+            if ($ptrValidation.CreatedPTRs.Count -gt 0) {
+                Export-AuditData -Data $ptrValidation.CreatedPTRs -BaseFileName "DNS_CreatedPTRRecords_${script:TimeStamp}" -Format $ExportFormat -Title "Auto-Created PTR Records"
+            }
+            
+            Write-AuditLog "PTR validation complete: $($ptrValidation.Statistics.PTRsMissing) missing, $($ptrValidation.Statistics.ZonesMissing) missing zones" -Level $(if ($ptrValidation.Statistics.PTRsMissing -gt 0 -or $ptrValidation.Statistics.ZonesMissing -gt 0) { "WARNING" } else { "SUCCESS" })
         }
         
         # Statistics
@@ -3858,6 +4393,9 @@ function Start-DNSAnalytics {
             StaleRecords = $analytics.StaleRecords.Count
             DuplicateIPs = $analytics.DuplicateIPs.Count
             MissingPTRs = $analytics.MissingPTRs.Count
+            MissingReverseZones = if ($analytics.MissingZones) { $analytics.MissingZones.Count } else { 0 }
+            CreatedZones = if ($analytics.CreatedZones) { $analytics.CreatedZones.Count } else { 0 }
+            CreatedPTRs = if ($analytics.CreatedPTRs) { $analytics.CreatedPTRs.Count } else { 0 }
             AnalysisDate = Get-Date
         }
         
@@ -3874,9 +4412,23 @@ function Start-DNSAnalytics {
         
         Export-AuditData -Data $analytics.Statistics -BaseFileName "DNS_Analytics_Statistics_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Analytics Statistics"
         
+        $summaryParts = @()
+        $summaryParts += "$($analytics.StaleRecords.Count) stale records"
+        $summaryParts += "$($analytics.DuplicateIPs.Count) duplicate IPs"
+        if ($ValidatePTRRecords) {
+            $summaryParts += "$($analytics.MissingPTRs.Count) missing PTRs"
+            if ($analytics.MissingZones) {
+                $summaryParts += "$($analytics.MissingZones.Count) missing reverse zones"
+            }
+            if ($AutoFix -and $analytics.CreatedZones) {
+                $summaryParts += "$($analytics.CreatedZones.Count) zones created"
+                $summaryParts += "$($analytics.CreatedPTRs.Count) PTRs created"
+            }
+        }
+        
         return @{
             Analytics = $analytics
-            Summary = "Analytics complete: $($analytics.StaleRecords.Count) stale, $($analytics.DuplicateIPs.Count) duplicate IPs, $($analytics.MissingPTRs.Count) missing PTRs"
+            Summary = "Analytics complete: $($summaryParts -join ', ')"
         }
         
     } catch {
