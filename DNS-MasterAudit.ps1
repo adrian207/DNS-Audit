@@ -382,11 +382,60 @@ param(
     [Parameter(HelpMessage = "Email from address")]
     [string]$EmailFrom,
     [Parameter(HelpMessage = "Email recipients")]
-    [string[]]$EmailTo
+    [string[]]$EmailTo,
+    
+    # Advanced Analytics Parameters (NEW in v2.5)
+    [Parameter(HelpMessage = "Stale record threshold in days (default: 90 days)")]
+    [ValidateRange(1, 3650)]
+    [int]$StaleRecordThreshold = 90,
+    [Parameter(HelpMessage = "Enable PTR record validation")]
+    [switch]$ValidatePTRRecords,
+    [Parameter(HelpMessage = "Detect duplicate IP addresses")]
+    [switch]$DetectDuplicateIPs,
+    
+    # Enterprise Integration Parameters (NEW in v2.5)
+    [Parameter(HelpMessage = "Microsoft Teams webhook URL for notifications")]
+    [string]$TeamsWebhook = "",
+    [Parameter(HelpMessage = "Slack webhook URL for notifications")]
+    [string]$SlackWebhook = "",
+    [Parameter(HelpMessage = "Syslog/SIEM server for log forwarding")]
+    [string]$SyslogServer = "",
+    [Parameter(HelpMessage = "Syslog port (default: 514)")]
+    [ValidateRange(1, 65535)]
+    [int]$SyslogPort = 514,
+    
+    # Security & Compliance Parameters (NEW in v2.5)
+    [Parameter(HelpMessage = "Enable DNSSEC validation checks")]
+    [switch]$EnableDNSSECCheck,
+    [Parameter(HelpMessage = "Audit zone transfer security")]
+    [switch]$AuditZoneTransfers,
+    [Parameter(HelpMessage = "Check for insecure dynamic updates")]
+    [switch]$CheckDynamicUpdates,
+    
+    # Remediation Parameters (NEW in v2.5)
+    [Parameter(HelpMessage = "Generate remediation scripts for found issues")]
+    [switch]$GenerateRemediationScript,
+    [Parameter(HelpMessage = "Auto-fix minor issues (use with caution!)")]
+    [switch]$AutoFix,
+    
+    # Enhanced Diagnostics Parameters (NEW in v2.5)
+    [Parameter(HelpMessage = "Test DNS query performance")]
+    [switch]$TestQueryPerformance,
+    [Parameter(HelpMessage = "Check AD replication lag")]
+    [switch]$CheckReplicationLag,
+    [Parameter(HelpMessage = "Number of DNS queries for performance testing (default: 10)")]
+    [ValidateRange(1, 100)]
+    [int]$PerformanceTestIterations = 10,
+    
+    # Configuration Management Parameters (NEW in v2.5)
+    [Parameter(HelpMessage = "Load configuration from profile (JSON file path)")]
+    [string]$ConfigProfile = "",
+    [Parameter(HelpMessage = "Save current parameters as configuration profile")]
+    [string]$SaveConfigProfile = ""
 )
 
 #region Script Variables
-$script:Version = "2.2 - Parallel Processing Edition"
+$script:Version = "2.5 - Enterprise Edition"
 $script:StartTime = Get-Date
 $script:TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $script:LogPath = ""
@@ -395,10 +444,15 @@ $script:AllResults = @{
     HealthCheck = $null
     RecordExport = $null
     SiteAudit = $null
+    Analytics = $null
+    Security = $null
+    Diagnostics = $null
 }
 $script:SkippedSubnets = @()
 $script:EnableParallelProcessing = $EnableParallelProcessing.IsPresent
 $script:MaxDegreeOfParallelism = $MaxDegreeOfParallelism
+$script:RemediationCommands = @()
+$script:IssuesFound = 0
 #endregion
 
 #region Logging Functions
@@ -1050,6 +1104,318 @@ function Test-DnsServerHealthSafe {
     }
     
     return $results
+}
+
+#endregion
+
+#region Enterprise Integration Functions (v2.5)
+
+<#
+.SYNOPSIS
+    Send notification to Microsoft Teams webhook
+#>
+function Send-TeamsNotification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WebhookUrl,
+        
+        [Parameter(Mandatory)]
+        [string]$Title,
+        
+        [Parameter(Mandatory)]
+        [string]$Message,
+        
+        [Parameter()]
+        [ValidateSet("Info", "Success", "Warning", "Error")]
+        [string]$Severity = "Info"
+    )
+    
+    try {
+        $color = switch ($Severity) {
+            "Success" { "00FF00" }
+            "Warning" { "FFA500" }
+            "Error" { "FF0000" }
+            default { "0078D4" }
+        }
+        
+        $body = @{
+            "@type" = "MessageCard"
+            "@context" = "https://schema.org/extensions"
+            "summary" = $Title
+            "themeColor" = $color
+            "title" = $Title
+            "text" = $Message
+        } | ConvertTo-Json -Depth 10
+        
+        Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+        Write-AuditLog "Teams notification sent successfully" -Level SUCCESS
+        
+    } catch {
+        Write-AuditLog "Failed to send Teams notification: $_" -Level WARNING
+    }
+}
+
+<#
+.SYNOPSIS
+    Send notification to Slack webhook
+#>
+function Send-SlackNotification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WebhookUrl,
+        
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+    
+    try {
+        $body = @{
+            text = $Message
+        } | ConvertTo-Json
+        
+        Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+        Write-AuditLog "Slack notification sent successfully" -Level SUCCESS
+        
+    } catch {
+        Write-AuditLog "Failed to send Slack notification: $_" -Level WARNING
+    }
+}
+
+<#
+.SYNOPSIS
+    Send log to Syslog/SIEM server
+#>
+function Send-SyslogMessage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Server,
+        
+        [Parameter()]
+        [int]$Port = 514,
+        
+        [Parameter(Mandatory)]
+        [string]$Message,
+        
+        [Parameter()]
+        [ValidateSet("Emergency", "Alert", "Critical", "Error", "Warning", "Notice", "Info", "Debug")]
+        [string]$Severity = "Info"
+    )
+    
+    try {
+        $severityMap = @{
+            "Emergency" = 0
+            "Alert" = 1
+            "Critical" = 2
+            "Error" = 3
+            "Warning" = 4
+            "Notice" = 5
+            "Info" = 6
+            "Debug" = 7
+        }
+        
+        $priority = $severityMap[$Severity]
+        $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+        $hostname = $env:COMPUTERNAME
+        $syslogMessage = "<$priority>$timestamp $hostname DNS-MasterAudit: $Message"
+        
+        $udpClient = New-Object System.Net.Sockets.UdpClient
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($syslogMessage)
+        $null = $udpClient.Send($bytes, $bytes.Length, $Server, $Port)
+        $udpClient.Close()
+        
+        Write-AuditLog "Syslog message sent to $Server`:$Port" -Level SUCCESS
+        
+    } catch {
+        Write-AuditLog "Failed to send Syslog message: $_" -Level WARNING
+    }
+}
+
+#endregion
+
+#region Configuration Management Functions (v2.5)
+
+<#
+.SYNOPSIS
+    Load configuration profile from JSON file
+#>
+function Import-ConfigProfile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ProfilePath
+    )
+    
+    try {
+        if (-not (Test-Path $ProfilePath)) {
+            throw "Configuration profile not found: $ProfilePath"
+        }
+        
+        $config = Get-Content $ProfilePath -Raw | ConvertFrom-Json
+        Write-AuditLog "Loaded configuration profile: $ProfilePath" -Level SUCCESS
+        return $config
+        
+    } catch {
+        Write-AuditLog "Failed to load configuration profile: $_" -Level ERROR
+        throw
+    }
+}
+
+<#
+.SYNOPSIS
+    Save current configuration as profile
+#>
+function Export-ConfigProfile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ProfilePath,
+        
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration
+    )
+    
+    try {
+        $config = $Configuration | ConvertTo-Json -Depth 10
+        $config | Out-File -FilePath $ProfilePath -Encoding UTF8 -Force
+        Write-AuditLog "Saved configuration profile: $ProfilePath" -Level SUCCESS
+        
+    } catch {
+        Write-AuditLog "Failed to save configuration profile: $_" -Level ERROR
+        throw
+    }
+}
+
+#endregion
+
+#region Remediation Functions (v2.5)
+
+<#
+.SYNOPSIS
+    Add remediation command to collection
+#>
+function Add-RemediationCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Issue,
+        
+        [Parameter(Mandatory)]
+        [string]$Command,
+        
+        [Parameter()]
+        [string]$Description = ""
+    )
+    
+    $script:RemediationCommands += [PSCustomObject]@{
+        Issue = $Issue
+        Command = $Command
+        Description = $Description
+        Timestamp = Get-Date
+    }
+    
+    $script:IssuesFound++
+}
+
+<#
+.SYNOPSIS
+    Generate PowerShell remediation script
+#>
+function Export-RemediationScript {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string]$OutputPath = $ExportPath
+    )
+    
+    if ($script:RemediationCommands.Count -eq 0) {
+        Write-AuditLog "No remediation commands to export" -Level INFO
+        return
+    }
+    
+    try {
+        $scriptPath = Join-Path $OutputPath "DNS_Remediation_${script:TimeStamp}.ps1"
+        
+        $scriptContent = @"
+################################################################################
+# DNS Remediation Script
+# Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+# Author: Adrian Johnson <adrian207@gmail.com>
+# Issues Found: $($script:RemediationCommands.Count)
+#
+# WARNING: Review all commands before executing!
+# This script was auto-generated and should be reviewed by an administrator.
+################################################################################
+
+#Requires -Version 5.1
+#Requires -Modules ActiveDirectory, DnsServer
+#Requires -RunAsAdministrator
+
+# Set error action preference
+`$ErrorActionPreference = 'Stop'
+
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "  DNS REMEDIATION SCRIPT" -ForegroundColor Cyan
+Write-Host "  Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")" -ForegroundColor Cyan
+Write-Host "  Issues to remediate: $($script:RemediationCommands.Count)" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Cyan
+
+# Confirm execution
+`$confirmation = Read-Host "Do you want to proceed with remediation? (yes/no)"
+if (`$confirmation -ne "yes") {
+    Write-Host "Remediation cancelled by user" -ForegroundColor Yellow
+    exit
+}
+
+`$successCount = 0
+`$failCount = 0
+
+"@
+        
+        $index = 1
+        foreach ($cmd in $script:RemediationCommands) {
+            $scriptContent += @"
+
+# ============================================================================
+# Issue $index of $($script:RemediationCommands.Count): $($cmd.Issue)
+# ============================================================================
+$(if ($cmd.Description) { "# Description: $($cmd.Description)`n" })
+Write-Host "`nProcessing issue $index`: $($cmd.Issue)" -ForegroundColor Yellow
+
+try {
+    $($cmd.Command)
+    Write-Host "  ✓ Fixed successfully" -ForegroundColor Green
+    `$successCount++
+} catch {
+    Write-Host "  ✗ Failed: `$_" -ForegroundColor Red
+    `$failCount++
+}
+
+"@
+            $index++
+        }
+        
+        $scriptContent += @"
+
+# ============================================================================
+# Summary
+# ============================================================================
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "  REMEDIATION COMPLETE" -ForegroundColor Cyan
+Write-Host "  Successful: `$successCount" -ForegroundColor Green
+Write-Host "  Failed: `$failCount" -ForegroundColor $(if (`$failCount -gt 0) { "Red" } else { "Green" })
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Cyan
+"@
+        
+        $scriptContent | Out-File -FilePath $scriptPath -Encoding UTF8 -Force
+        Write-AuditLog "Remediation script generated: $scriptPath" -Level SUCCESS
+        Write-Host "`n✓ Remediation script: $scriptPath" -ForegroundColor Green
+        
+    } catch {
+        Write-AuditLog "Failed to generate remediation script: $_" -Level ERROR
+    }
 }
 
 #endregion
@@ -2316,15 +2682,524 @@ function Start-CompareMode {
 
 #endregion
 
+#region Mode 8: DNS Analytics (v2.5)
+
+function Start-DNSAnalytics {
+    <#
+    .SYNOPSIS
+        Advanced analytics: stale records, duplicates, PTR validation
+    #>
+    param([PSCredential]$Credential)
+    
+    Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor Cyan
+    Write-Host "│  MODE 8: ADVANCED DNS ANALYTICS                │" -ForegroundColor Cyan
+    Write-Host "└─────────────────────────────────────────────────┘`n" -ForegroundColor Cyan
+    Write-AuditLog "Starting advanced DNS analytics..." -Level INFO
+    
+    try {
+        $analytics = @{
+            StaleRecords = @()
+            DuplicateIPs = @()
+            MissingPTRs = @()
+            Statistics = @{}
+        }
+        
+        # Get all DNS servers
+        $adParams = @{}
+        if ($Credential) { $adParams['Credential'] = $Credential }
+        $dnsServers = Get-ADDomainController @adParams -Filter * | Select-Object -ExpandProperty Name
+        
+        Write-AuditLog "Analyzing DNS records across $($dnsServers.Count) servers..." -Level INFO
+        
+        # Collect all records
+        $allRecords = @()
+        foreach ($server in $dnsServers) {
+            try {
+                $zones = Get-DnsServerZone -ComputerName $server -ErrorAction SilentlyContinue | Where-Object { -not $_.IsAutoCreated }
+                
+                foreach ($zone in $zones) {
+                    try {
+                        $records = Get-DnsServerResourceRecord -ComputerName $server -ZoneName $zone.ZoneName -ErrorAction SilentlyContinue
+                        
+                        foreach ($record in $records) {
+                            $allRecords += [PSCustomObject]@{
+                                Server = $server
+                                Zone = $zone.ZoneName
+                                Name = $record.HostName
+                                Type = $record.RecordType
+                                Data = $record.RecordData
+                                Timestamp = $record.Timestamp
+                                TimeToLive = $record.TimeToLive
+                            }
+                        }
+                    } catch {
+                        Write-AuditLog "Failed to query zone $($zone.ZoneName) on $server" -Level WARNING
+                    }
+                }
+            } catch {
+                Write-AuditLog "Failed to query DNS zones on $server" -Level WARNING
+            }
+        }
+        
+        Write-AuditLog "Collected $($allRecords.Count) DNS records for analysis" -Level SUCCESS
+        
+        # Analyze 1: Stale Records
+        Write-AuditLog "Analyzing stale records (threshold: $StaleRecordThreshold days)..." -Level INFO
+        $staleThreshold = (Get-Date).AddDays(-$StaleRecordThreshold)
+        
+        $staleRecords = $allRecords | Where-Object {
+            $_.Timestamp -and $_.Timestamp -lt $staleThreshold
+        }
+        
+        foreach ($record in $staleRecords) {
+            $daysOld = [math]::Round(((Get-Date) - $record.Timestamp).TotalDays)
+            $analytics.StaleRecords += [PSCustomObject]@{
+                Server = $record.Server
+                Zone = $record.Zone
+                Name = $record.Name
+                Type = $record.Type
+                Age = "$daysOld days"
+                Timestamp = $record.Timestamp
+            }
+            
+            # Add remediation command
+            if ($GenerateRemediationScript) {
+                Add-RemediationCommand `
+                    -Issue "Stale DNS record: $($record.Name) in $($record.Zone)" `
+                    -Command "Remove-DnsServerResourceRecord -ComputerName '$($record.Server)' -ZoneName '$($record.Zone)' -Name '$($record.Name)' -RRType '$($record.Type)' -Force" `
+                    -Description "Record is $daysOld days old (threshold: $StaleRecordThreshold days)"
+            }
+        }
+        
+        Write-AuditLog "Found $($staleRecords.Count) stale records" -Level $(if ($staleRecords.Count -gt 0) { "WARNING" } else { "SUCCESS" })
+        
+        # Analyze 2: Duplicate IPs
+        if ($DetectDuplicateIPs) {
+            Write-AuditLog "Detecting duplicate IP addresses..." -Level INFO
+            
+            $aRecords = $allRecords | Where-Object { $_.Type -eq "A" }
+            $ipGroups = $aRecords | Group-Object -Property { $_.Data.IPv4Address } | Where-Object { $_.Count -gt 1 }
+            
+            foreach ($group in $ipGroups) {
+                $analytics.DuplicateIPs += [PSCustomObject]@{
+                    IPAddress = $group.Name
+                    Count = $group.Count
+                    Records = ($group.Group | ForEach-Object { "$($_.Name).$($_.Zone)" }) -join ", "
+                }
+                
+                # Add remediation command
+                if ($GenerateRemediationScript) {
+                    Add-RemediationCommand `
+                        -Issue "Duplicate IP address: $($group.Name)" `
+                        -Command "# Review and consolidate: $($group.Name) is used by $($group.Count) records" `
+                        -Description "Manual review required for records: $($analytics.DuplicateIPs[-1].Records)"
+                }
+            }
+            
+            Write-AuditLog "Found $($ipGroups.Count) duplicate IP addresses" -Level $(if ($ipGroups.Count -gt 0) { "WARNING" } else { "SUCCESS" })
+        }
+        
+        # Analyze 3: PTR Record Validation
+        if ($ValidatePTRRecords) {
+            Write-AuditLog "Validating PTR records..." -Level INFO
+            
+            $aRecords = $allRecords | Where-Object { $_.Type -eq "A" }
+            $ptrRecords = $allRecords | Where-Object { $_.Type -eq "PTR" }
+            
+            foreach ($aRecord in $aRecords) {
+                $ip = $aRecord.Data.IPv4Address
+                if (-not $ip) { continue }
+                
+                # Check if PTR exists
+                $reverseName = ($ip.Split('.')[3..0] -join '.') + ".in-addr.arpa"
+                $ptrExists = $ptrRecords | Where-Object { $_.Zone -like "*in-addr.arpa" -and $_.Data.PtrDomainName -like "*$($aRecord.Name)*" }
+                
+                if (-not $ptrExists) {
+                    $analytics.MissingPTRs += [PSCustomObject]@{
+                        ForwardName = "$($aRecord.Name).$($aRecord.Zone)"
+                        IPAddress = $ip
+                        ReverseLookupZone = $reverseName
+                        Server = $aRecord.Server
+                    }
+                    
+                    # Add remediation command
+                    if ($GenerateRemediationScript) {
+                        $reverseZone = ($ip.Split('.')[0..2] -join '.') + ".in-addr.arpa"
+                        $ptrName = $ip.Split('.')[3]
+                        Add-RemediationCommand `
+                            -Issue "Missing PTR record for $($aRecord.Name).$($aRecord.Zone) ($ip)" `
+                            -Command "Add-DnsServerResourceRecordPtr -ComputerName '$($aRecord.Server)' -ZoneName '$reverseZone' -Name '$ptrName' -PtrDomainName '$($aRecord.Name).$($aRecord.Zone)'" `
+                            -Description "Create reverse DNS pointer for $ip"
+                    }
+                }
+            }
+            
+            Write-AuditLog "Found $($analytics.MissingPTRs.Count) missing PTR records" -Level $(if ($analytics.MissingPTRs.Count -gt 0) { "WARNING" } else { "SUCCESS" })
+        }
+        
+        # Statistics
+        $analytics.Statistics = @{
+            TotalRecords = $allRecords.Count
+            StaleRecords = $analytics.StaleRecords.Count
+            DuplicateIPs = $analytics.DuplicateIPs.Count
+            MissingPTRs = $analytics.MissingPTRs.Count
+            AnalysisDate = Get-Date
+        }
+        
+        # Export results
+        if ($analytics.StaleRecords.Count -gt 0) {
+            Export-AuditData -Data $analytics.StaleRecords -BaseFileName "DNS_StaleRecords_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Stale Records"
+        }
+        if ($analytics.DuplicateIPs.Count -gt 0) {
+            Export-AuditData -Data $analytics.DuplicateIPs -BaseFileName "DNS_DuplicateIPs_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Duplicate IP Addresses"
+        }
+        if ($analytics.MissingPTRs.Count -gt 0) {
+            Export-AuditData -Data $analytics.MissingPTRs -BaseFileName "DNS_MissingPTRs_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Missing PTR Records"
+        }
+        
+        Export-AuditData -Data $analytics.Statistics -BaseFileName "DNS_Analytics_Statistics_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Analytics Statistics"
+        
+        return @{
+            Analytics = $analytics
+            Summary = "Analytics complete: $($analytics.StaleRecords.Count) stale, $($analytics.DuplicateIPs.Count) duplicate IPs, $($analytics.MissingPTRs.Count) missing PTRs"
+        }
+        
+    } catch {
+        Write-AuditLog "Analytics failed: $($_.Exception.Message)" -Level ERROR
+        throw
+    }
+}
+
+#endregion
+
+#region Mode 9: DNS Security Audit (v2.5)
+
+function Start-DNSSecurityAudit {
+    <#
+    .SYNOPSIS
+        Security audit: DNSSEC, zone transfers, dynamic updates
+    #>
+    param([PSCredential]$Credential)
+    
+    Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor Cyan
+    Write-Host "│  MODE 9: DNS SECURITY AUDIT                    │" -ForegroundColor Cyan
+    Write-Host "└─────────────────────────────────────────────────┘`n" -ForegroundColor Cyan
+    Write-AuditLog "Starting DNS security audit..." -Level INFO
+    
+    try {
+        $security = @{
+            DNSSEC = @()
+            ZoneTransfers = @()
+            DynamicUpdates = @()
+            Statistics = @{}
+        }
+        
+        # Get all DNS servers
+        $adParams = @{}
+        if ($Credential) { $adParams['Credential'] = $Credential }
+        $dnsServers = Get-ADDomainController @adParams -Filter * | Select-Object -ExpandProperty Name
+        
+        Write-AuditLog "Auditing DNS security across $($dnsServers.Count) servers..." -Level INFO
+        
+        foreach ($server in $dnsServers) {
+            try {
+                $zones = Get-DnsServerZone -ComputerName $server -ErrorAction SilentlyContinue | Where-Object { -not $_.IsAutoCreated }
+                
+                foreach ($zone in $zones) {
+                    $zoneName = $zone.ZoneName
+                    
+                    # Check 1: DNSSEC Status
+                    if ($EnableDNSSECCheck) {
+                        $dnssecStatus = if ($zone.IsSigned) { "SIGNED" } else { "UNSIGNED" }
+                        $security.DNSSEC += [PSCustomObject]@{
+                            Server = $server
+                            Zone = $zoneName
+                            Status = $dnssecStatus
+                            IsSigned = $zone.IsSigned
+                            Recommendation = if (-not $zone.IsSigned) { "Enable DNSSEC signing" } else { "OK" }
+                        }
+                        
+                        if (-not $zone.IsSigned -and $GenerateRemediationScript) {
+                            Add-RemediationCommand `
+                                -Issue "DNSSEC not enabled: $zoneName on $server" `
+                                -Command "# Enable DNSSEC: Invoke-DnsServerZoneSign -ZoneName '$zoneName' -ComputerName '$server'" `
+                                -Description "DNSSEC provides cryptographic authentication of DNS data"
+                        }
+                    }
+                    
+                    # Check 2: Zone Transfer Security
+                    if ($AuditZoneTransfers) {
+                        $xfrSetting = $zone.SecondaryServers
+                        $xfrSecure = if ($zone.SecureSecondaries -eq "TransferToSecureServers") { "SECURE" } else { "INSECURE" }
+                        
+                        $security.ZoneTransfers += [PSCustomObject]@{
+                            Server = $server
+                            Zone = $zoneName
+                            Setting = $zone.SecureSecondaries
+                            Security = $xfrSecure
+                            AllowedServers = if ($xfrSetting) { $xfrSetting -join ", " } else { "ANY (INSECURE!)" }
+                            Recommendation = if ($xfrSecure -eq "INSECURE") { "Restrict zone transfers" } else { "OK" }
+                        }
+                        
+                        if ($xfrSecure -eq "INSECURE" -and $GenerateRemediationScript) {
+                            Add-RemediationCommand `
+                                -Issue "Insecure zone transfer: $zoneName on $server" `
+                                -Command "Set-DnsServerPrimaryZone -Name '$zoneName' -ComputerName '$server' -SecureSecondaries TransferToSecureServers" `
+                                -Description "Restrict zone transfers to specific servers only"
+                        }
+                    }
+                    
+                    # Check 3: Dynamic Update Security
+                    if ($CheckDynamicUpdates) {
+                        $dynamicUpdate = $zone.DynamicUpdate
+                        $isSecure = $dynamicUpdate -eq "Secure"
+                        
+                        $security.DynamicUpdates += [PSCustomObject]@{
+                            Server = $server
+                            Zone = $zoneName
+                            Setting = $dynamicUpdate
+                            Security = if ($isSecure) { "SECURE" } else { "INSECURE" }
+                            Recommendation = if ($dynamicUpdate -eq "NonsecureAndSecure") { "Use secure dynamic updates only" } else { "OK" }
+                        }
+                        
+                        if ($dynamicUpdate -eq "NonsecureAndSecure" -and $GenerateRemediationScript) {
+                            Add-RemediationCommand `
+                                -Issue "Insecure dynamic updates: $zoneName on $server" `
+                                -Command "Set-DnsServerPrimaryZone -Name '$zoneName' -ComputerName '$server' -DynamicUpdate Secure" `
+                                -Description "Restrict to secure (authenticated) dynamic updates only"
+                        }
+                    }
+                }
+            } catch {
+                Write-AuditLog "Failed to audit security on $server" -Level WARNING
+            }
+        }
+        
+        # Statistics
+        $security.Statistics = @{
+            ServersAudited = $dnsServers.Count
+            UnsignedZones = ($security.DNSSEC | Where-Object { -not $_.IsSigned }).Count
+            InsecureZoneTransfers = ($security.ZoneTransfers | Where-Object { $_.Security -eq "INSECURE" }).Count
+            InsecureDynamicUpdates = ($security.DynamicUpdates | Where-Object { $_.Security -eq "INSECURE" }).Count
+            AuditDate = Get-Date
+        }
+        
+        Write-AuditLog "Security audit complete" -Level SUCCESS
+        Write-AuditLog "  Unsigned zones: $($security.Statistics.UnsignedZones)" -Level $(if ($security.Statistics.UnsignedZones -gt 0) { "WARNING" } else { "SUCCESS" })
+        Write-AuditLog "  Insecure zone transfers: $($security.Statistics.InsecureZoneTransfers)" -Level $(if ($security.Statistics.InsecureZoneTransfers -gt 0) { "WARNING" } else { "SUCCESS" })
+        Write-AuditLog "  Insecure dynamic updates: $($security.Statistics.InsecureDynamicUpdates)" -Level $(if ($security.Statistics.InsecureDynamicUpdates -gt 0) { "WARNING" } else { "SUCCESS" })
+        
+        # Export results
+        if ($security.DNSSEC.Count -gt 0) {
+            Export-AuditData -Data $security.DNSSEC -BaseFileName "DNS_DNSSEC_Audit_${script:TimeStamp}" -Format $ExportFormat -Title "DNS DNSSEC Status"
+        }
+        if ($security.ZoneTransfers.Count -gt 0) {
+            Export-AuditData -Data $security.ZoneTransfers -BaseFileName "DNS_ZoneTransfer_Audit_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Zone Transfer Security"
+        }
+        if ($security.DynamicUpdates.Count -gt 0) {
+            Export-AuditData -Data $security.DynamicUpdates -BaseFileName "DNS_DynamicUpdate_Audit_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Dynamic Update Security"
+        }
+        
+        Export-AuditData -Data $security.Statistics -BaseFileName "DNS_Security_Statistics_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Security Statistics"
+        
+        return @{
+            Security = $security
+            Summary = "Security audit: $($security.Statistics.UnsignedZones) unsigned zones, $($security.Statistics.InsecureZoneTransfers) insecure transfers, $($security.Statistics.InsecureDynamicUpdates) insecure updates"
+        }
+        
+    } catch {
+        Write-AuditLog "Security audit failed: $($_.Exception.Message)" -Level ERROR
+        throw
+    }
+}
+
+#endregion
+
+#region Mode 10: DNS Diagnostics (v2.5)
+
+function Start-DNSDiagnostics {
+    <#
+    .SYNOPSIS
+        Enhanced diagnostics: performance, replication lag
+    #>
+    param([PSCredential]$Credential)
+    
+    Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor Cyan
+    Write-Host "│  MODE 10: DNS DIAGNOSTICS                      │" -ForegroundColor Cyan
+    Write-Host "└─────────────────────────────────────────────────┘`n" -ForegroundColor Cyan
+    Write-AuditLog "Starting DNS diagnostics..." -Level INFO
+    
+    try {
+        $diagnostics = @{
+            QueryPerformance = @()
+            ReplicationLag = @()
+            Statistics = @{}
+        }
+        
+        # Get all DNS servers
+        $adParams = @{}
+        if ($Credential) { $adParams['Credential'] = $Credential }
+        $dnsServers = Get-ADDomainController @adParams -Filter * | Select-Object Name, IPv4Address
+        $domain = (Get-ADDomain @adParams).DNSRoot
+        
+        # Test 1: Query Performance
+        if ($TestQueryPerformance) {
+            Write-AuditLog "Testing DNS query performance ($PerformanceTestIterations iterations per server)..." -Level INFO
+            
+            foreach ($dc in $dnsServers) {
+                $responseTimes = @()
+                
+                for ($i = 1; $i -le $PerformanceTestIterations; $i++) {
+                    try {
+                        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                        $null = Resolve-DnsName -Name $domain -Server $dc.IPv4Address -ErrorAction Stop
+                        $sw.Stop()
+                        $responseTimes += $sw.Elapsed.TotalMilliseconds
+                    } catch {
+                        Write-AuditLog "Query failed: $($dc.Name)" -Level WARNING
+                    }
+                }
+                
+                if ($responseTimes.Count -gt 0) {
+                    $avgTime = [math]::Round(($responseTimes | Measure-Object -Average).Average, 2)
+                    $minTime = [math]::Round(($responseTimes | Measure-Object -Minimum).Minimum, 2)
+                    $maxTime = [math]::Round(($responseTimes | Measure-Object -Maximum).Maximum, 2)
+                    
+                    $status = if ($avgTime -lt 50) { "EXCELLENT" } elseif ($avgTime -lt 100) { "GOOD" } elseif ($avgTime -lt 200) { "FAIR" } else { "SLOW" }
+                    
+                    $diagnostics.QueryPerformance += [PSCustomObject]@{
+                        Server = $dc.Name
+                        IPAddress = $dc.IPv4Address
+                        AverageMS = $avgTime
+                        MinMS = $minTime
+                        MaxMS = $maxTime
+                        Iterations = $responseTimes.Count
+                        Status = $status
+                    }
+                    
+                    if ($status -eq "SLOW" -and $GenerateRemediationScript) {
+                        Add-RemediationCommand `
+                            -Issue "Slow DNS response: $($dc.Name) (avg: ${avgTime}ms)" `
+                            -Command "# Investigate: Check DNS service health, network latency, and server load on $($dc.Name)" `
+                            -Description "Average response time exceeds 200ms"
+                    }
+                }
+            }
+            
+            Write-AuditLog "Query performance testing complete" -Level SUCCESS
+        }
+        
+        # Test 2: AD Replication Lag
+        if ($CheckReplicationLag) {
+            Write-AuditLog "Checking AD replication lag..." -Level INFO
+            
+            try {
+                $repSummary = Get-ADReplicationPartnerMetadata -Target * -Scope Domain -ErrorAction Stop
+                
+                foreach ($rep in $repSummary) {
+                    $lagSeconds = if ($rep.LastReplicationSuccess) {
+                        [math]::Round(((Get-Date) - $rep.LastReplicationSuccess).TotalSeconds)
+                    } else {
+                        -1
+                    }
+                    
+                    $status = if ($lagSeconds -lt 0) { "UNKNOWN" } elseif ($lagSeconds -lt 3600) { "HEALTHY" } elseif ($lagSeconds -lt 10800) { "WARNING" } else { "CRITICAL" }
+                    
+                    $diagnostics.ReplicationLag += [PSCustomObject]@{
+                        Server = $rep.Server
+                        Partner = $rep.Partner
+                        LastReplication = if ($rep.LastReplicationSuccess) { $rep.LastReplicationSuccess.ToString("yyyy-MM-dd HH:mm:ss") } else { "Never" }
+                        LagSeconds = $lagSeconds
+                        Status = $status
+                    }
+                    
+                    if ($status -eq "CRITICAL" -and $GenerateRemediationScript) {
+                        Add-RemediationCommand `
+                            -Issue "AD replication lag: $($rep.Server) -> $($rep.Partner)" `
+                            -Command "# Investigate: repadmin /showrepl $($rep.Server)" `
+                            -Description "Replication lag exceeds 3 hours"
+                    }
+                }
+                
+                Write-AuditLog "Replication lag check complete" -Level SUCCESS
+                
+            } catch {
+                Write-AuditLog "Failed to check replication lag: $_" -Level WARNING
+            }
+        }
+        
+        # Statistics
+        $diagnostics.Statistics = @{
+            ServersTested = $dnsServers.Count
+            AverageQueryTime = if ($diagnostics.QueryPerformance.Count -gt 0) { [math]::Round(($diagnostics.QueryPerformance.AverageMS | Measure-Object -Average).Average, 2) } else { 0 }
+            SlowServers = ($diagnostics.QueryPerformance | Where-Object { $_.Status -eq "SLOW" }).Count
+            ReplicationIssues = ($diagnostics.ReplicationLag | Where-Object { $_.Status -in @("WARNING", "CRITICAL") }).Count
+            DiagnosticDate = Get-Date
+        }
+        
+        Write-AuditLog "Diagnostics complete" -Level SUCCESS
+        Write-AuditLog "  Average query time: $($diagnostics.Statistics.AverageQueryTime)ms" -Level SUCCESS
+        Write-AuditLog "  Slow servers: $($diagnostics.Statistics.SlowServers)" -Level $(if ($diagnostics.Statistics.SlowServers -gt 0) { "WARNING" } else { "SUCCESS" })
+        Write-AuditLog "  Replication issues: $($diagnostics.Statistics.ReplicationIssues)" -Level $(if ($diagnostics.Statistics.ReplicationIssues -gt 0) { "WARNING" } else { "SUCCESS" })
+        
+        # Export results
+        if ($diagnostics.QueryPerformance.Count -gt 0) {
+            Export-AuditData -Data $diagnostics.QueryPerformance -BaseFileName "DNS_QueryPerformance_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Query Performance"
+        }
+        if ($diagnostics.ReplicationLag.Count -gt 0) {
+            Export-AuditData -Data $diagnostics.ReplicationLag -BaseFileName "DNS_ReplicationLag_${script:TimeStamp}" -Format $ExportFormat -Title "AD Replication Status"
+        }
+        
+        Export-AuditData -Data $diagnostics.Statistics -BaseFileName "DNS_Diagnostics_Statistics_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Diagnostics Statistics"
+        
+        return @{
+            Diagnostics = $diagnostics
+            Summary = "Diagnostics: Avg query ${($diagnostics.Statistics.AverageQueryTime)}ms, $($diagnostics.Statistics.SlowServers) slow servers, $($diagnostics.Statistics.ReplicationIssues) replication issues"
+        }
+        
+    } catch {
+        Write-AuditLog "Diagnostics failed: $($_.Exception.Message)" -Level ERROR
+        throw
+    }
+}
+
+#endregion
+
 #region Main Execution
 
 try {
     # Initialize
     Start-MasterLogging -Path $ExportPath
+    
+    # Configuration Profile Management (v2.5)
+    if ($ConfigProfile) {
+        Write-AuditLog "Loading configuration profile: $ConfigProfile" -Level INFO
+        try {
+            $config = Import-ConfigProfile -ProfilePath $ConfigProfile
+            # Apply configuration settings (override parameters)
+            if ($config.Mode) { $Mode = $config.Mode }
+            if ($config.ExportPath) { $ExportPath = $config.ExportPath }
+            if ($config.ExportFormat) { $ExportFormat = $config.ExportFormat }
+            if ($config.StaleRecordThreshold) { $StaleRecordThreshold = $config.StaleRecordThreshold }
+            if ($config.EnableParallelProcessing) { $script:EnableParallelProcessing = $config.EnableParallelProcessing }
+            if ($config.MaxDegreeOfParallelism) { $script:MaxDegreeOfParallelism = $config.MaxDegreeOfParallelism }
+            if ($config.TeamsWebhook) { $TeamsWebhook = $config.TeamsWebhook }
+            if ($config.SlackWebhook) { $SlackWebhook = $config.SlackWebhook }
+            if ($config.SyslogServer) { $SyslogServer = $config.SyslogServer }
+            Write-AuditLog "Configuration profile loaded successfully" -Level SUCCESS
+        } catch {
+            Write-AuditLog "Failed to load configuration profile: $_" -Level ERROR
+            throw
+        }
+    }
+    
     Write-Host "Mode:        $Mode" -ForegroundColor White
     Write-Host "Export Path: $ExportPath" -ForegroundColor White
     if ($ZoneFilter.Count -gt 0) {
         Write-Host "Zone Filter: $($ZoneFilter -join ', ')" -ForegroundColor White
+    }
+    if ($script:EnableParallelProcessing) {
+        Write-Host "Parallel Processing: ENABLED (throttle: $script:MaxDegreeOfParallelism)" -ForegroundColor Green
     }
     Write-Host ""
     # Execute selected mode
@@ -2336,6 +3211,9 @@ try {
         "Complete" { Start-CompleteAudit -Credential $Credential -DnsServer $DnsServer -UnionZones:$UnionZones }
         "Baseline" { Start-BaselineMode -Credential $Credential }
         "Compare" { Start-CompareMode -BaselineFilePath $BaselineFile -Credential $Credential }
+        "Analytics" { Start-DNSAnalytics -Credential $Credential }
+        "Security" { Start-DNSSecurityAudit -Credential $Credential }
+        "Diagnostics" { Start-DNSDiagnostics -Credential $Credential }
     }
     # Email notification
     if ($EnableEmailNotification) {
@@ -2381,6 +3259,49 @@ This is an automated notification from DNS Master Audit (Independent Edition).
             }
         }
     }
+    
+    # Enterprise Integration (v2.5)
+    $summaryMessage = if ($Results.Summary) { $Results.Summary } else { "DNS Audit completed: $Mode" }
+    
+    # Teams notification
+    if ($TeamsWebhook) {
+        Write-AuditLog "Sending Teams notification..." -Level INFO
+        $severity = if ($script:IssuesFound -gt 0) { "Warning" } else { "Success" }
+        Send-TeamsNotification `
+            -WebhookUrl $TeamsWebhook `
+            -Title "DNS Master Audit Complete" `
+            -Message "$summaryMessage`n`nMode: $Mode`nIssues Found: $script:IssuesFound`nDuration: $([math]::Round(((Get-Date) - $script:StartTime).TotalMinutes, 2)) minutes" `
+            -Severity $severity
+    }
+    
+    # Slack notification
+    if ($SlackWebhook) {
+        Write-AuditLog "Sending Slack notification..." -Level INFO
+        $emoji = if ($script:IssuesFound -gt 0) { ":warning:" } else { ":white_check_mark:" }
+        Send-SlackNotification `
+            -WebhookUrl $SlackWebhook `
+            -Message "$emoji *DNS Master Audit Complete*`n*Mode:* $Mode`n*Summary:* $summaryMessage`n*Issues Found:* $script:IssuesFound`n*Duration:* $([math]::Round(((Get-Date) - $script:StartTime).TotalMinutes, 2)) minutes"
+    }
+    
+    # Syslog/SIEM integration
+    if ($SyslogServer) {
+        Write-AuditLog "Sending audit results to Syslog server..." -Level INFO
+        $syslogSeverity = if ($script:IssuesFound -gt 10) { "Warning" } elseif ($script:IssuesFound -gt 0) { "Notice" } else { "Info" }
+        Send-SyslogMessage `
+            -Server $SyslogServer `
+            -Port $SyslogPort `
+            -Message "DNS Audit Complete - Mode: $Mode, Issues: $script:IssuesFound, Duration: $([math]::Round(((Get-Date) - $script:StartTime).TotalMinutes, 2))min" `
+            -Severity $syslogSeverity
+    }
+    
+    # Generate remediation script
+    if ($GenerateRemediationScript -and $script:RemediationCommands.Count -gt 0) {
+        Write-AuditLog "Generating remediation script ($($script:RemediationCommands.Count) commands)..." -Level INFO
+        Export-RemediationScript -OutputPath $ExportPath
+    } elseif ($GenerateRemediationScript) {
+        Write-AuditLog "No issues found - no remediation script generated" -Level SUCCESS
+    }
+    
     # Determine exit code for CI/CD integration
     $ExitCode = 0
     # Check for Critical severity issues in SiteAudit
