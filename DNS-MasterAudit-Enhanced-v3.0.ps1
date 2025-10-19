@@ -148,9 +148,9 @@ https://github.com/adrian207/DNS-Audit
 [CmdletBinding(SupportsShouldProcess)]
 param(
     # Core Parameters
-    [Parameter(Mandatory = $true, HelpMessage = "Operation mode")]
+    [Parameter(HelpMessage = "Operation mode (or use interactive menu)")]
     [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete", "Baseline", "Compare", "ConfigAudit", "ZoneHealth")]
-    [string]$Mode,
+    [string]$Mode = "",
     
     [Parameter(HelpMessage = "Export directory for all reports")]
     [string]$ExportPath = "C:\DNSAudit",
@@ -249,11 +249,27 @@ param(
     [string]$EmailFrom,
     
     [Parameter(HelpMessage = "Email recipients")]
-    [string[]]$EmailTo
+    [string[]]$EmailTo,
+    
+    # UI Enhancement Parameters (NEW in v3.1)
+    [Parameter(HelpMessage = "Use interactive menu to select mode (when -Mode not specified)")]
+    [switch]$InteractiveMenu,
+    
+    [Parameter(HelpMessage = "Show enhanced progress indicators with ETA")]
+    [switch]$ShowProgress = $true,
+    
+    [Parameter(HelpMessage = "Display executive summary dashboard at completion")]
+    [switch]$ShowSummary = $true,
+    
+    [Parameter(HelpMessage = "Automatically open results folder/files after completion")]
+    [switch]$AutoOpenResults,
+    
+    [Parameter(HelpMessage = "Suppress interactive prompts (for automation/Server Core)")]
+    [switch]$NonInteractive
 )
 
 #region Script Variables
-$script:Version = "3.0.0 - Enterprise Edition"
+$script:Version = "3.1 - UI Enhanced Edition"
 $script:Author = "Adrian Johnson <adrian207@gmail.com>"
 $script:StartTime = Get-Date
 $script:TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -266,6 +282,24 @@ $script:PerfMetrics = @{
     DCsProcessed = 0
     RecordsProcessed = 0
     QueriesExecuted = 0
+}
+
+# UI variables (v3.1)
+$script:ShowProgress = $ShowProgress
+$script:ShowSummary = $ShowSummary
+$script:AutoOpenResults = $AutoOpenResults.IsPresent
+$script:NonInteractive = $NonInteractive.IsPresent
+$script:IsServerCore = $false
+$script:IsRemoteSession = $false
+$script:HasGUI = $true
+$script:ExecutionStats = @{
+    ServersProcessed = 0
+    ZonesProcessed = 0
+    RecordsProcessed = 0
+    SuccessCount = 0
+    WarningCount = 0
+    ErrorCount = 0
+    TopFindings = @()
 }
 
 # Initialize baseline path if not specified
@@ -351,6 +385,385 @@ if (![string]::IsNullOrEmpty($ConfigFile) -and (Test-Path $ConfigFile)) {
         # Add more config mappings as needed
     }
 }
+#endregion
+
+#region UI Enhancement Functions (v3.1)
+
+<#
+.SYNOPSIS
+    Detect environment capabilities (Server Core, Remote Session, GUI)
+#>
+function Test-EnvironmentCapabilities {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        # Detect Server Core
+        $installType = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\" -Name InstallationType -ErrorAction SilentlyContinue
+        $script:IsServerCore = $installType.InstallationType -eq "Server Core"
+        
+        # Detect remote session
+        $script:IsRemoteSession = [bool]($env:SSH_CONNECTION -or $PSSenderInfo)
+        
+        # Determine GUI availability
+        $script:HasGUI = -not $script:IsServerCore -and -not $script:IsRemoteSession -and -not $script:NonInteractive
+        
+        if (-not $Quiet) {
+            Write-Host "Environment Detection:" -ForegroundColor Cyan
+            Write-Host "  Server Core: $script:IsServerCore" -ForegroundColor Gray
+            Write-Host "  Remote Session: $script:IsRemoteSession" -ForegroundColor Gray
+            Write-Host "  GUI Available: $script:HasGUI" -ForegroundColor Gray
+            Write-Host ""
+        }
+    } catch {
+        Write-Warning "Environment detection failed, assuming GUI available: $_"
+        $script:HasGUI = $true
+    }
+}
+
+<#
+.SYNOPSIS
+    Display interactive mode selection menu
+#>
+function Show-ModeSelectionMenu {
+    [CmdletBinding()]
+    param()
+    
+    Clear-Host
+    
+    Write-Host ""
+    Write-Host "╔═════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║      DNS Master Audit v$script:Version - Mode Selection       ║" -ForegroundColor Cyan
+    Write-Host "╚═════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Select audit mode:" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  [1]  📊 DNS Inventory" -ForegroundColor Yellow -NoNewline
+    Write-Host "         - Discover all DNS servers" -ForegroundColor Gray
+    Write-Host "  [2]  ❤️  DNS Health Check" -ForegroundColor Yellow -NoNewline
+    Write-Host "      - Test service health on all DCs" -ForegroundColor Gray
+    Write-Host "  [3]  📁 DNS Record Export" -ForegroundColor Yellow -NoNewline
+    Write-Host "     - Export all DNS records from zones" -ForegroundColor Gray
+    Write-Host "  [4]  🗺️  DNS Site Audit" -ForegroundColor Yellow -NoNewline
+    Write-Host "        - Find site mismatches (Critical!)" -ForegroundColor Gray
+    Write-Host "  [5]  🔍 Complete Audit" -ForegroundColor Green -NoNewline
+    Write-Host "        - Run all audits (RECOMMENDED)" -ForegroundColor Gray
+    Write-Host "  [6]  📸 Baseline Mode" -ForegroundColor Yellow -NoNewline
+    Write-Host "         - Create DNS configuration snapshot" -ForegroundColor Gray
+    Write-Host "  [7]  🔎 Compare Mode" -ForegroundColor Yellow -NoNewline
+    Write-Host "          - Detect configuration drift vs baseline" -ForegroundColor Gray
+    Write-Host "  [8]  ⚙️  Config Audit" -ForegroundColor Magenta -NoNewline
+    Write-Host "         - Configuration consistency check (NEW!)" -ForegroundColor Gray
+    Write-Host "  [9]  🏥 Zone Health" -ForegroundColor Magenta -NoNewline
+    Write-Host "          - Zone integrity & RFC compliance (NEW!)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  [0]  ❌ Exit" -ForegroundColor Red
+    Write-Host ""
+    
+    do {
+        $selection = Read-Host "Enter selection (0-9)"
+        $validSelection = $selection -match '^[0-9]$'
+        if (-not $validSelection) {
+            Write-Host "Invalid selection. Please enter a number between 0 and 9." -ForegroundColor Red
+        }
+    } while (-not $validSelection)
+    
+    $modeMap = @{
+        "1" = "Inventory"
+        "2" = "HealthCheck"
+        "3" = "RecordExport"
+        "4" = "SiteAudit"
+        "5" = "Complete"
+        "6" = "Baseline"
+        "7" = "Compare"
+        "8" = "ConfigAudit"
+        "9" = "ZoneHealth"
+        "0" = "Exit"
+    }
+    
+    $selectedMode = $modeMap[$selection]
+    
+    if ($selectedMode -eq "Exit") {
+        Write-Host ""
+        Write-Host "Exiting DNS Master Audit. Goodbye!" -ForegroundColor Cyan
+        exit 0
+    }
+    
+    Write-Host ""
+    Write-Host "✓ Selected: $selectedMode Mode" -ForegroundColor Green
+    Write-Host ""
+    Start-Sleep -Milliseconds 500
+    
+    return $selectedMode
+}
+
+<#
+.SYNOPSIS
+    Enhanced progress indicator with ETA calculation
+#>
+function Show-EnhancedProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Activity,
+        
+        [Parameter(Mandatory)]
+        [int]$Current,
+        
+        [Parameter(Mandatory)]
+        [int]$Total,
+        
+        [Parameter()]
+        [string]$CurrentItem = "",
+        
+        [Parameter()]
+        [datetime]$StartTime = $script:StartTime
+    )
+    
+    if (-not $script:ShowProgress) {
+        return
+    }
+    
+    $percentComplete = if ($Total -gt 0) { [math]::Round(($Current / $Total) * 100) } else { 0 }
+    
+    # Calculate ETA
+    $elapsed = (Get-Date) - $StartTime
+    if ($Current -gt 0) {
+        $avgTimePerItem = $elapsed.TotalSeconds / $Current
+        $remaining = $Total - $Current
+        $etaSeconds = $avgTimePerItem * $remaining
+        $etaTimeSpan = [TimeSpan]::FromSeconds($etaSeconds)
+        
+        if ($etaSeconds -gt 3600) {
+            $etaString = "$([math]::Round($etaTimeSpan.TotalHours, 1))h"
+        } elseif ($etaSeconds -gt 60) {
+            $etaString = "$([math]::Round($etaTimeSpan.TotalMinutes, 1))m"
+        } else {
+            $etaString = "$([math]::Round($etaSeconds))s"
+        }
+        
+        $throughput = if ($elapsed.TotalSeconds -gt 0) { 
+            [math]::Round($Current / $elapsed.TotalSeconds, 1) 
+        } else { 
+            0 
+        }
+        
+        $status = "($Current/$Total) | ETA: $etaString | Rate: $throughput/s"
+    } else {
+        $status = "($Current/$Total) | Initializing..."
+    }
+    
+    if ($CurrentItem) {
+        $status = "$status`nCurrent: $CurrentItem"
+    }
+    
+    Write-Progress -Activity $Activity -Status $status -PercentComplete $percentComplete
+}
+
+<#
+.SYNOPSIS
+    Display executive summary dashboard at completion
+#>
+function Show-ExecutiveSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [hashtable]$Results = @{},
+        
+        [Parameter(Mandatory)]
+        [string]$Mode,
+        
+        [Parameter(Mandatory)]
+        [string]$ExportPath
+    )
+    
+    if (-not $script:ShowSummary) {
+        return
+    }
+    
+    $duration = ((Get-Date) - $script:StartTime)
+    $durationString = if ($duration.TotalHours -gt 1) {
+        "$([math]::Round($duration.TotalHours, 1)) hours"
+    } elseif ($duration.TotalMinutes -gt 1) {
+        "$([math]::Round($duration.TotalMinutes, 1)) minutes"
+    } else {
+        "$([math]::Round($duration.TotalSeconds)) seconds"
+    }
+    
+    Write-Host ""
+    Write-Host "╔═════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║              📊 AUDIT EXECUTION SUMMARY                         ║" -ForegroundColor Green
+    Write-Host "╚═════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Mode:             " -NoNewline -ForegroundColor White
+    Write-Host "$Mode Audit" -ForegroundColor Cyan
+    Write-Host "  Duration:         " -NoNewline -ForegroundColor White
+    Write-Host $durationString -ForegroundColor Cyan
+    Write-Host "  Completion Time:  " -NoNewline -ForegroundColor White
+    Write-Host (Get-Date -Format "yyyy-MM-dd HH:mm:ss") -ForegroundColor Cyan
+    Write-Host ""
+    
+    # Statistics
+    if ($script:ExecutionStats.ServersProcessed -gt 0) {
+        Write-Host "  Servers Audited:  " -NoNewline -ForegroundColor White
+        Write-Host "$($script:ExecutionStats.ServersProcessed) Domain Controllers" -ForegroundColor Cyan
+    }
+    if ($script:ExecutionStats.ZonesProcessed -gt 0) {
+        Write-Host "  Zones Processed:  " -NoNewline -ForegroundColor White
+        Write-Host "$($script:ExecutionStats.ZonesProcessed) DNS Zones" -ForegroundColor Cyan
+    }
+    if ($script:ExecutionStats.RecordsProcessed -gt 0) {
+        Write-Host "  Records Analyzed: " -NoNewline -ForegroundColor White
+        Write-Host "$($script:ExecutionStats.RecordsProcessed) DNS Records" -ForegroundColor Cyan
+    }
+    Write-Host ""
+    
+    # Results summary
+    $successIcon = if ($script:ExecutionStats.ErrorCount -eq 0) { "✓" } else { "✓" }
+    $warningIcon = if ($script:ExecutionStats.WarningCount -gt 0) { "⚠" } else { "○" }
+    $errorIcon = if ($script:ExecutionStats.ErrorCount -gt 0) { "✗" } else { "○" }
+    
+    Write-Host "  $successIcon Successes:      " -NoNewline -ForegroundColor Green
+    Write-Host "$($script:ExecutionStats.SuccessCount) operations completed" -ForegroundColor White
+    
+    if ($script:ExecutionStats.WarningCount -gt 0) {
+        Write-Host "  $warningIcon Warnings:       " -NoNewline -ForegroundColor Yellow
+        Write-Host "$($script:ExecutionStats.WarningCount) minor issues found" -ForegroundColor White
+    }
+    
+    if ($script:ExecutionStats.ErrorCount -gt 0) {
+        Write-Host "  $errorIcon Errors:         " -NoNewline -ForegroundColor Red
+        Write-Host "$($script:ExecutionStats.ErrorCount) failures occurred" -ForegroundColor White
+    } else {
+        Write-Host "  $errorIcon Errors:         " -NoNewline -ForegroundColor Green
+        Write-Host "0 critical failures" -ForegroundColor White
+    }
+    
+    Write-Host ""
+    
+    # Export files
+    Write-Host "  📁 Exports:" -ForegroundColor White
+    if (Test-Path $ExportPath) {
+        $exportFiles = Get-ChildItem -Path $ExportPath -Filter "*$script:TimeStamp*" -ErrorAction SilentlyContinue
+        foreach ($file in $exportFiles | Select-Object -First 5) {
+            $sizeKB = [math]::Round($file.Length / 1KB, 1)
+            Write-Host "     → " -NoNewline -ForegroundColor Gray
+            Write-Host "$($file.Name) " -NoNewline -ForegroundColor Cyan
+            Write-Host "($sizeKB KB)" -ForegroundColor Gray
+        }
+        
+        if ($exportFiles.Count -gt 5) {
+            Write-Host "     ... and $($exportFiles.Count - 5) more files" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "     Export path: $ExportPath" -ForegroundColor Gray
+    }
+    
+    Write-Host ""
+    
+    # Top findings
+    if ($script:ExecutionStats.TopFindings.Count -gt 0) {
+        Write-Host "  🎯 Top Findings:" -ForegroundColor White
+        foreach ($finding in $script:ExecutionStats.TopFindings | Select-Object -First 5) {
+            Write-Host "     • $finding" -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
+    
+    # Interactive prompt (if GUI available)
+    if ($script:HasGUI -and -not $script:NonInteractive) {
+        Write-Host "  ═══════════════════════════════════════════════════════════════" -ForegroundColor Gray
+        Write-Host ""
+        if ($script:AutoOpenResults) {
+            Write-Host "  Opening results..." -ForegroundColor Cyan
+            Start-Sleep -Milliseconds 500
+            try {
+                if (Test-Path $ExportPath) {
+                    Start-Process explorer.exe $ExportPath
+                    $htmlFiles = Get-ChildItem -Path $ExportPath -Filter "*$script:TimeStamp*.html" -ErrorAction SilentlyContinue
+                    if ($htmlFiles) {
+                        Start-Process $htmlFiles[0].FullName
+                    }
+                }
+            } catch {
+                Write-Host "  Could not auto-open results: $_" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  Press " -NoNewline -ForegroundColor Gray
+            Write-Host "O" -NoNewline -ForegroundColor Cyan
+            Write-Host " to open results folder, or any other key to exit..." -ForegroundColor Gray
+            $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            if ($key.Character -eq 'O' -or $key.Character -eq 'o') {
+                try {
+                    if (Test-Path $ExportPath) {
+                        Start-Process explorer.exe $ExportPath
+                        $htmlFiles = Get-ChildItem -Path $ExportPath -Filter "*$script:TimeStamp*.html" -ErrorAction SilentlyContinue
+                        if ($htmlFiles) {
+                            Start-Process $htmlFiles[0].FullName
+                        }
+                    }
+                } catch {
+                    Write-Host "  Could not open results: $_" -ForegroundColor Yellow
+                }
+            }
+        }
+    } elseif ($script:IsServerCore) {
+        # Server Core specific instructions
+        Write-Host "  ═══════════════════════════════════════════════════════════════" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  📁 Server Core - Access Results:" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  UNC Path:" -ForegroundColor White
+        Write-Host "     \\$env:COMPUTERNAME\$($ExportPath -replace ':', '$')" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  PowerShell Commands:" -ForegroundColor White
+        Write-Host "     explorer.exe '\\$env:COMPUTERNAME\$($ExportPath -replace ':', '$')'" -ForegroundColor Gray
+        Write-Host "     Get-ChildItem '$ExportPath' | Out-GridView" -ForegroundColor Gray
+        Write-Host ""
+    }
+}
+
+<#
+.SYNOPSIS
+    Update execution statistics for summary
+#>
+function Update-ExecutionStats {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [int]$ServersProcessed = 0,
+        
+        [Parameter()]
+        [int]$ZonesProcessed = 0,
+        
+        [Parameter()]
+        [int]$RecordsProcessed = 0,
+        
+        [Parameter()]
+        [int]$SuccessCount = 0,
+        
+        [Parameter()]
+        [int]$WarningCount = 0,
+        
+        [Parameter()]
+        [int]$ErrorCount = 0,
+        
+        [Parameter()]
+        [string[]]$Findings = @()
+    )
+    
+    $script:ExecutionStats.ServersProcessed += $ServersProcessed
+    $script:ExecutionStats.ZonesProcessed += $ZonesProcessed
+    $script:ExecutionStats.RecordsProcessed += $RecordsProcessed
+    $script:ExecutionStats.SuccessCount += $SuccessCount
+    $script:ExecutionStats.WarningCount += $WarningCount
+    $script:ExecutionStats.ErrorCount += $ErrorCount
+    
+    if ($Findings.Count -gt 0) {
+        $script:ExecutionStats.TopFindings += $Findings
+    }
+}
+
 #endregion
 
 #region Mode 11: Configuration Audit
@@ -1118,4 +1531,96 @@ function Start-DNSZoneHealthAudit {
 
 #endregion
 
+#region Main Execution
 
+# Environment Detection
+Test-EnvironmentCapabilities
+
+# Interactive Menu (if Mode not specified and not in NonInteractive mode)
+if ([string]::IsNullOrEmpty($Mode) -and -not $script:NonInteractive) {
+    $Mode = Show-ModeSelectionMenu
+} elseif ([string]::IsNullOrEmpty($Mode)) {
+    Write-Host "ERROR: -Mode parameter is required when using -NonInteractive" -ForegroundColor Red
+    Write-Host "Available modes: Inventory, HealthCheck, RecordExport, SiteAudit, Complete, Baseline, Compare, ConfigAudit, ZoneHealth" -ForegroundColor Yellow
+    exit 1
+}
+
+# Display banner (if not quiet)
+if (-not $Quiet) {
+    Write-Host ""
+    Write-Host "╔═════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║          DNS Master Audit v$script:Version                    ║" -ForegroundColor Cyan
+    Write-Host "╚═════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Mode:        $Mode" -ForegroundColor White
+    Write-Host "  Export Path: $ExportPath" -ForegroundColor White
+    if ($EnableParallelProcessing) {
+        Write-Host "  Parallel:    ENABLED (throttle: $MaxDegreeOfParallelism)" -ForegroundColor Green
+    }
+    if ($script:ShowProgress) {
+        Write-Host "  Progress:    Enhanced with ETA" -ForegroundColor Green
+    }
+    Write-Host ""
+}
+
+# Execute selected mode
+try {
+    $Results = switch ($Mode) {
+        "ConfigAudit" { 
+            $auditResults = Start-DNSConfigurationAudit -Credential $Credential
+            Update-ExecutionStats -ServersProcessed $auditResults.Statistics.TotalServers `
+                -SuccessCount 1 `
+                -WarningCount $auditResults.Issues.Count `
+                -Findings $auditResults.Issues
+            $auditResults
+        }
+        "ZoneHealth" { 
+            $auditResults = Start-DNSZoneHealthAudit -Credential $Credential -ZoneFilter $ZoneFilter
+            Update-ExecutionStats -ZonesProcessed $auditResults.Statistics.TotalZones `
+                -SuccessCount 1 `
+                -WarningCount $auditResults.Issues.Count `
+                -Findings $auditResults.Issues
+            $auditResults
+        }
+        default {
+            Write-Host "⚠️  Mode '$Mode' is defined but not yet fully implemented in v3.1" -ForegroundColor Yellow
+            Write-Host "   This mode is available in DNS-MasterAudit.ps1 (v2.8)" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "   Current v3.1 modes:" -ForegroundColor Cyan
+            Write-Host "     • ConfigAudit - Configuration consistency audit" -ForegroundColor White
+            Write-Host "     • ZoneHealth - Zone health and integrity audit" -ForegroundColor White
+            Write-Host ""
+            @{ Message = "Mode not implemented in v3.1"; Mode = $Mode }
+        }
+    }
+    
+    # Display executive summary
+    Show-ExecutiveSummary -Results $Results -Mode $Mode -ExportPath $ExportPath
+    
+    # Export results if requested
+    if ($ExportFormat -and $Results -and $Results -isnot [string]) {
+        Write-Host "Exporting results..." -ForegroundColor Cyan
+        # TODO: Add export functionality for ConfigAudit and ZoneHealth
+    }
+    
+    exit 0
+}
+catch {
+    Write-Host ""
+    Write-Host "╔═════════════════════════════════════════════════════════════════╗" -ForegroundColor Red
+    Write-Host "║                     FATAL ERROR                                 ║" -ForegroundColor Red
+    Write-Host "╚═════════════════════════════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Stack Trace:" -ForegroundColor Yellow
+    Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor Gray
+    Write-Host ""
+    
+    Update-ExecutionStats -ErrorCount 1
+    Show-ExecutiveSummary -Results @{} -Mode $Mode -ExportPath $ExportPath
+    
+    exit 1
+}
+
+#endregion
