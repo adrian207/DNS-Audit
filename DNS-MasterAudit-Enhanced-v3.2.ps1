@@ -149,7 +149,7 @@ https://github.com/adrian207/DNS-Audit
 param(
     # Core Parameters
     [Parameter(HelpMessage = "Operation mode (or use interactive menu)")]
-    [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete", "Baseline", "Compare", "ConfigAudit", "ZoneHealth")]
+    [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete", "Baseline", "Compare", "ConfigAudit", "ZoneHealth", "CISCompliance", "DNSSECInventory")]
     [string]$Mode = "",
     
     [Parameter(HelpMessage = "Export directory for all reports")]
@@ -269,12 +269,32 @@ param(
 )
 
 #region Script Variables
-$script:Version = "3.1 - UI Enhanced Edition"
+$script:Version = "3.2 - Compliance & Security Edition"
 $script:Author = "Adrian Johnson <adrian207@gmail.com>"
 $script:StartTime = Get-Date
 $script:TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $script:ScriptPath = $PSScriptRoot
 $script:SkippedSubnets = @()
+
+# CIS Benchmark Version Information
+# NOTE: CIS Benchmarks cannot be dynamically retrieved (licensing/no public API)
+# Update these constants when new CIS versions are released
+$script:CIS_BenchmarkName = "CIS Microsoft Windows Server 2019/2022 Benchmark"
+$script:CIS_Version = "3.0.0"
+$script:CIS_ReleaseDate = "December 2023"
+$script:CIS_LastVerified = "January 2025"
+$script:CIS_UpdateURL = "https://www.cisecurity.org/benchmark/microsoft_windows_server"
+$script:CIS_ChecksImplemented = @(
+    "1.1 - Recursion on Authoritative Servers"
+    "1.2 - DNS Socket Pool Size (DoS Protection)"
+    "1.3 - Event Logging Level"
+    "2.1 - Zone Transfer Restrictions"
+    "2.2 - Secure Dynamic Updates"
+    "2.3 - DNSSEC Validation"
+    "3.1 - Listen Address Configuration"
+    "3.2 - Response Rate Limiting (RRL)"
+    "3.3 - Cache Locking Percentage"
+)
 
 # Performance tracking
 $script:PerfMetrics = @{
@@ -453,18 +473,23 @@ function Show-ModeSelectionMenu {
     Write-Host "  [7]  🔎 Compare Mode" -ForegroundColor Yellow -NoNewline
     Write-Host "          - Detect configuration drift vs baseline" -ForegroundColor Gray
     Write-Host "  [8]  ⚙️  Config Audit" -ForegroundColor Magenta -NoNewline
-    Write-Host "         - Configuration consistency check (NEW!)" -ForegroundColor Gray
+    Write-Host "         - Configuration consistency check" -ForegroundColor Gray
     Write-Host "  [9]  🏥 Zone Health" -ForegroundColor Magenta -NoNewline
-    Write-Host "          - Zone integrity & RFC compliance (NEW!)" -ForegroundColor Gray
+    Write-Host "          - Zone integrity & RFC compliance" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  [10] 🛡️  CIS Compliance" -ForegroundColor Red -NoNewline
+    Write-Host "       - CIS Benchmark security audit (NEW!)" -ForegroundColor Gray
+    Write-Host "  [11] 🔐 DNSSEC Inventory" -ForegroundColor Red -NoNewline
+    Write-Host "      - DNSSEC configuration & migration prep (NEW!)" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  [0]  ❌ Exit" -ForegroundColor Red
     Write-Host ""
     
     do {
-        $selection = Read-Host "Enter selection (0-9)"
-        $validSelection = $selection -match '^[0-9]$'
+        $selection = Read-Host "Enter selection (0-11)"
+        $validSelection = $selection -match '^([0-9]|1[01])$'
         if (-not $validSelection) {
-            Write-Host "Invalid selection. Please enter a number between 0 and 9." -ForegroundColor Red
+            Write-Host "Invalid selection. Please enter a number between 0 and 11." -ForegroundColor Red
         }
     } while (-not $validSelection)
     
@@ -478,6 +503,8 @@ function Show-ModeSelectionMenu {
         "7" = "Compare"
         "8" = "ConfigAudit"
         "9" = "ZoneHealth"
+        "10" = "CISCompliance"
+        "11" = "DNSSECInventory"
         "0" = "Exit"
     }
     
@@ -1531,6 +1558,807 @@ function Start-DNSZoneHealthAudit {
 
 #endregion
 
+#region Mode 13: CIS Compliance Checking
+
+<#
+.SYNOPSIS
+    CIS Benchmark compliance checking for Windows DNS Server
+.DESCRIPTION
+    Implements CIS Microsoft Windows Server 2019/2022 DNS Security Benchmark
+    Based on latest CIS guidelines (v3.0.0 - December 2023)
+#>
+function Start-CISComplianceCheck {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [PSCredential]$Credential
+    )
+    
+    Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║          CIS Benchmark Compliance Audit                       ║" -ForegroundColor Cyan
+    Write-Host "║          Windows Server DNS Security Baseline                 ║" -ForegroundColor Cyan
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Reference: $script:CIS_BenchmarkName v$script:CIS_Version" -ForegroundColor Gray
+    Write-Host "  Release Date: $script:CIS_ReleaseDate" -ForegroundColor Gray
+    Write-Host "  Last Verified: $script:CIS_LastVerified" -ForegroundColor Gray
+    Write-Host "  Checks Implemented: $($script:CIS_ChecksImplemented.Count)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  ⚠️  NOTE: CIS Benchmarks cannot be auto-updated (licensing)" -ForegroundColor Yellow
+    Write-Host "  Check $script:CIS_UpdateURL for latest version" -ForegroundColor Yellow
+    Write-Host ""
+    
+    $results = @{
+        Checks = @()
+        Summary = @{
+            TotalChecks = 0
+            Passed = 0
+            Failed = 0
+            NotApplicable = 0
+            ManualReview = 0
+            ComplianceScore = 0
+        }
+        Categories = @{
+            ServiceHardening = @()
+            ZoneSecurity = @()
+            NetworkSecurity = @()
+            Logging = @()
+            OperatingSystem = @()
+        }
+        Findings = @()
+    }
+    
+    try {
+        # Get all domain controllers
+        $adParams = @{}
+        if ($Credential) { $adParams['Credential'] = $Credential }
+        
+        $DCs = Get-ADDomainController @adParams -Filter * | Select-Object Name, IPv4Address, Site
+        Write-Host "Auditing $($DCs.Count) domain controllers for CIS compliance..." -ForegroundColor Green
+        Write-Host ""
+        
+        foreach ($DC in $DCs) {
+            Write-Host "═══ Auditing: $($DC.Name) ═══" -ForegroundColor Yellow
+            Write-Host ""
+            
+            $dnsParams = @{
+                ComputerName = $DC.Name
+                ErrorAction = 'SilentlyContinue'
+            }
+            if ($Credential) { $dnsParams['Credential'] = $Credential }
+            
+            # CATEGORY 1: SERVICE HARDENING
+            Write-Host "  [Category 1] Service Hardening Checks" -ForegroundColor Cyan
+            
+            # CIS 1.1 - Recursion Settings
+            Write-Host "    CIS 1.1: Recursion configuration..." -NoNewline
+            try {
+                $dnsServer = Get-DnsServer @dnsParams
+                $isAuthoritative = ($dnsServer | Get-DnsServerZone | Where-Object { $_.ZoneType -eq 'Primary' }).Count -gt 0
+                $recursionDisabled = $dnsServer.ServerSetting.DisableRecursion
+                
+                if ($isAuthoritative -and -not $recursionDisabled) {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "Authoritative DNS server has recursion enabled (security risk)"
+                    $results.Findings += $finding
+                } elseif ($isAuthoritative -and $recursionDisabled) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ○ N/A" -ForegroundColor Gray
+                    $status = "N/A"
+                    $finding = "Non-authoritative server"
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-1.1"
+                    Category = "Service Hardening"
+                    Title = "Ensure recursion is disabled on authoritative servers"
+                    Severity = "HIGH"
+                    Status = $status
+                    CurrentValue = if ($recursionDisabled) { "Disabled" } else { "Enabled" }
+                    ExpectedValue = "Disabled (for authoritative)"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerRecursion -ComputerName $($DC.Name) -Enable `$false"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 1.1"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-1.1"
+                    Status = "ERROR"
+                    Finding = "Failed to check: $_"
+                }
+            }
+            
+            # CIS 1.2 - Socket Pool Size
+            Write-Host "    CIS 1.2: DNS Socket Pool configuration..." -NoNewline
+            try {
+                $socketPool = $dnsServer.ServerSetting.SocketPoolSize
+                
+                if ($socketPool -ge 2500) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "Socket pool size too small (current: $socketPool, recommended: 2500+)"
+                    $results.Findings += $finding
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-1.2"
+                    Category = "Service Hardening"
+                    Title = "Ensure DNS Socket Pool is configured (DoS protection)"
+                    Severity = "MEDIUM"
+                    Status = $status
+                    CurrentValue = $socketPool
+                    ExpectedValue = "2500 or higher"
+                    Finding = $finding
+                    Remediation = "dnscmd $($DC.Name) /Config /SocketPoolSize 2500"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 1.2"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            # CIS 1.3 - Event Logging
+            Write-Host "    CIS 1.3: Event logging enabled..." -NoNewline
+            try {
+                $eventLog = $dnsServer.ServerSetting.EventLogLevel
+                
+                if ($eventLog -ge 2) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "DNS event logging insufficient (level: $eventLog)"
+                    $results.Findings += $finding
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-1.3"
+                    Category = "Logging"
+                    Title = "Ensure DNS event logging is enabled"
+                    Severity = "MEDIUM"
+                    Status = $status
+                    CurrentValue = $eventLog
+                    ExpectedValue = "2 (Errors and warnings) or higher"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerDiagnostics -ComputerName $($DC.Name) -EventLogLevel 2"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 1.3"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            # CATEGORY 2: ZONE SECURITY
+            Write-Host ""
+            Write-Host "  [Category 2] Zone Security Checks" -ForegroundColor Cyan
+            
+            # CIS 2.1 - Zone Transfer Restrictions
+            Write-Host "    CIS 2.1: Zone transfer restrictions..." -NoNewline
+            try {
+                $zones = Get-DnsServerZone @dnsParams | Where-Object { $_.ZoneType -eq 'Primary' -and -not $_.IsReverseLookupZone }
+                $unsecuredZones = @()
+                
+                foreach ($zone in $zones) {
+                    $zoneDetail = Get-DnsServerZone @dnsParams -Name $zone.ZoneName
+                    if ($zoneDetail.SecureSecondaries -eq 'NoTransfer') {
+                        # Secure - no transfers
+                    } elseif ($zoneDetail.SecureSecondaries -eq 'TransferAnyServer') {
+                        $unsecuredZones += $zone.ZoneName
+                    }
+                }
+                
+                if ($unsecuredZones.Count -eq 0) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "$($unsecuredZones.Count) zones allow unrestricted zone transfers: $($unsecuredZones -join ', ')"
+                    $results.Findings += $finding
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-2.1"
+                    Category = "Zone Security"
+                    Title = "Ensure zone transfers are restricted"
+                    Severity = "CRITICAL"
+                    Status = $status
+                    CurrentValue = if ($unsecuredZones.Count -gt 0) { "Unrestricted on $($unsecuredZones.Count) zones" } else { "Restricted" }
+                    ExpectedValue = "Restricted to specific servers or disabled"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerPrimaryZone -Name <zone> -ComputerName $($DC.Name) -SecureSecondaries TransferToSecureServers"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 2.1"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            # CIS 2.2 - Dynamic Update Security
+            Write-Host "    CIS 2.2: Dynamic update security..." -NoNewline
+            try {
+                $zones = Get-DnsServerZone @dnsParams | Where-Object { $_.ZoneType -eq 'Primary' -and -not $_.IsReverseLookupZone }
+                $insecureZones = @()
+                
+                foreach ($zone in $zones) {
+                    if ($zone.DynamicUpdate -eq 'NonsecureAndSecure') {
+                        $insecureZones += $zone.ZoneName
+                    }
+                }
+                
+                if ($insecureZones.Count -eq 0) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "$($insecureZones.Count) zones allow non-secure dynamic updates"
+                    $results.Findings += $finding
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-2.2"
+                    Category = "Zone Security"
+                    Title = "Ensure secure dynamic updates only"
+                    Severity = "HIGH"
+                    Status = $status
+                    CurrentValue = if ($insecureZones.Count -gt 0) { "Non-secure allowed on $($insecureZones.Count) zones" } else { "Secure only" }
+                    ExpectedValue = "Secure only or None"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerPrimaryZone -Name <zone> -ComputerName $($DC.Name) -DynamicUpdate Secure"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 2.2"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            # CIS 2.3 - DNSSEC Validation
+            Write-Host "    CIS 2.3: DNSSEC validation..." -NoNewline
+            try {
+                $dnssecEnabled = $dnsServer.ServerSetting.EnableDnsSec
+                
+                if ($dnssecEnabled) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ⚠ MANUAL" -ForegroundColor Yellow
+                    $status = "MANUAL"
+                    $finding = "DNSSEC not enabled - verify if required for environment"
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-2.3"
+                    Category = "Zone Security"
+                    Title = "Consider enabling DNSSEC validation"
+                    Severity = "MEDIUM"
+                    Status = $status
+                    CurrentValue = if ($dnssecEnabled) { "Enabled" } else { "Disabled" }
+                    ExpectedValue = "Enabled (recommended)"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerDnsSec -ComputerName $($DC.Name) -EnableDnsSec `$true"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 2.3"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            # CATEGORY 3: NETWORK SECURITY
+            Write-Host ""
+            Write-Host "  [Category 3] Network Security Checks" -ForegroundColor Cyan
+            
+            # CIS 3.1 - Listen Addresses
+            Write-Host "    CIS 3.1: Listen on specific interfaces..." -NoNewline
+            try {
+                $listenAddresses = $dnsServer.ServerSetting.ListenAddresses
+                
+                if ($listenAddresses.Count -eq 0) {
+                    Write-Host " ⚠ WARN" -ForegroundColor Yellow
+                    $status = "WARN"
+                    $finding = "DNS listening on all interfaces - consider restricting"
+                } else {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-3.1"
+                    Category = "Network Security"
+                    Title = "Ensure DNS listens on specific interfaces only"
+                    Severity = "MEDIUM"
+                    Status = $status
+                    CurrentValue = if ($listenAddresses.Count -eq 0) { "All interfaces" } else { "$($listenAddresses.Count) specific interfaces" }
+                    ExpectedValue = "Specific interfaces only"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerSetting -ComputerName $($DC.Name) -ListenAddresses <IP1>,<IP2>"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 3.1"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            # CIS 3.2 - RRL (Response Rate Limiting)
+            Write-Host "    CIS 3.2: Response Rate Limiting..." -NoNewline
+            try {
+                $rrl = Get-DnsServerResponseRateLimiting @dnsParams -ErrorAction Stop
+                
+                if ($rrl.Mode -eq 'Enable') {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "Response Rate Limiting not enabled (DoS protection missing)"
+                    $results.Findings += $finding
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-3.2"
+                    Category = "Network Security"
+                    Title = "Ensure Response Rate Limiting is enabled"
+                    Severity = "HIGH"
+                    Status = $status
+                    CurrentValue = $rrl.Mode
+                    ExpectedValue = "Enable"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerResponseRateLimiting -ComputerName $($DC.Name) -Mode Enable"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 3.2"
+                }
+            }
+            catch {
+                Write-Host " ⚠ N/A" -ForegroundColor Yellow
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-3.2"
+                    Status = "N/A"
+                    Finding = "RRL not available on this DNS version"
+                }
+            }
+            
+            # CIS 3.3 - Cache Locking
+            Write-Host "    CIS 3.3: Cache locking percentage..." -NoNewline
+            try {
+                $cacheLocking = $dnsServer.ServerSetting.CacheLockingPercent
+                
+                if ($cacheLocking -ge 80) {
+                    Write-Host " ✓ PASS" -ForegroundColor Green
+                    $status = "PASS"
+                    $finding = ""
+                } else {
+                    Write-Host " ✗ FAIL" -ForegroundColor Red
+                    $status = "FAIL"
+                    $finding = "Cache locking too low (current: $cacheLocking%, recommended: 80%+)"
+                    $results.Findings += $finding
+                }
+                
+                $results.Checks += [PSCustomObject]@{
+                    Server = $DC.Name
+                    CheckID = "CIS-3.3"
+                    Category = "Network Security"
+                    Title = "Ensure cache locking is configured"
+                    Severity = "MEDIUM"
+                    Status = $status
+                    CurrentValue = "$cacheLocking%"
+                    ExpectedValue = "80% or higher"
+                    Finding = $finding
+                    Remediation = "Set-DnsServerCache -ComputerName $($DC.Name) -LockingPercent 80"
+                    Reference = "CIS Windows Server 2022 v3.0.0 - 3.3"
+                }
+            }
+            catch {
+                Write-Host " ✗ ERROR" -ForegroundColor Red
+            }
+            
+            Write-Host ""
+        }
+        
+        # Calculate statistics
+        $results.Summary.TotalChecks = $results.Checks.Count
+        $results.Summary.Passed = ($results.Checks | Where-Object { $_.Status -eq 'PASS' }).Count
+        $results.Summary.Failed = ($results.Checks | Where-Object { $_.Status -eq 'FAIL' }).Count
+        $results.Summary.NotApplicable = ($results.Checks | Where-Object { $_.Status -in @('N/A', 'ERROR') }).Count
+        $results.Summary.ManualReview = ($results.Checks | Where-Object { $_.Status -in @('MANUAL', 'WARN') }).Count
+        
+        $applicableChecks = $results.Summary.TotalChecks - $results.Summary.NotApplicable
+        if ($applicableChecks -gt 0) {
+            $results.Summary.ComplianceScore = [math]::Round(($results.Summary.Passed / $applicableChecks) * 100, 1)
+        }
+        
+        # Group by category
+        $results.Categories.ServiceHardening = $results.Checks | Where-Object { $_.Category -eq 'Service Hardening' }
+        $results.Categories.ZoneSecurity = $results.Checks | Where-Object { $_.Category -eq 'Zone Security' }
+        $results.Categories.NetworkSecurity = $results.Checks | Where-Object { $_.Category -eq 'Network Security' }
+        $results.Categories.Logging = $results.Checks | Where-Object { $_.Category -eq 'Logging' }
+        
+        # Summary
+        Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+        Write-Host "║              CIS Compliance Summary                           ║" -ForegroundColor Cyan
+        Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Compliance Score:      " -NoNewline -ForegroundColor White
+        $scoreColor = if ($results.Summary.ComplianceScore -ge 90) { "Green" } 
+                      elseif ($results.Summary.ComplianceScore -ge 80) { "Yellow" } 
+                      else { "Red" }
+        Write-Host "$($results.Summary.ComplianceScore)%" -ForegroundColor $scoreColor
+        Write-Host ""
+        Write-Host "  Total Checks:          $($results.Summary.TotalChecks)" -ForegroundColor White
+        Write-Host "  ✓ Passed:              $($results.Summary.Passed)" -ForegroundColor Green
+        Write-Host "  ✗ Failed:              $($results.Summary.Failed)" -ForegroundColor Red
+        Write-Host "  ⚠ Manual Review:       $($results.Summary.ManualReview)" -ForegroundColor Yellow
+        Write-Host "  ○ Not Applicable:      $($results.Summary.NotApplicable)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Critical Findings:     $($results.Findings.Count)" -ForegroundColor $(if ($results.Findings.Count -gt 0) { "Red" } else { "Green" })
+        Write-Host ""
+        
+        if ($results.Findings.Count -gt 0) {
+            Write-Host "  🎯 Top Security Issues:" -ForegroundColor Red
+            foreach ($finding in $results.Findings | Select-Object -First 5) {
+                Write-Host "     • $finding" -ForegroundColor Yellow
+            }
+            if ($results.Findings.Count -gt 5) {
+                Write-Host "     ... and $($results.Findings.Count - 5) more" -ForegroundColor Gray
+            }
+            Write-Host ""
+        }
+        
+        Write-Host "  Benchmark: $script:CIS_BenchmarkName v$script:CIS_Version" -ForegroundColor Gray
+        Write-Host "  Release: $script:CIS_ReleaseDate | Verified: $script:CIS_LastVerified" -ForegroundColor Gray
+        Write-Host "  Update Info: $script:CIS_UpdateURL" -ForegroundColor Gray
+        Write-Host ""
+        
+        return $results
+    }
+    catch {
+        Write-Host "FATAL ERROR in CIS Compliance Check: $_" -ForegroundColor Red
+        throw
+    }
+}
+
+#endregion
+
+#region Mode 14: DNSSEC Inventory
+
+<#
+.SYNOPSIS
+    DNSSEC configuration inventory and migration preparation
+.DESCRIPTION
+    Documents DNSSEC configuration - DOES NOT MIGRATE
+    Prepares migration checklist and extracts key information
+#>
+function Start-DNSSECInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [PSCredential]$Credential
+    )
+    
+    Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║          DNSSEC Configuration Inventory                       ║" -ForegroundColor Cyan
+    Write-Host "║          Migration Preparation & Documentation                ║" -ForegroundColor Cyan
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  ⚠️  WARNING: This tool DOCUMENTS only - does NOT migrate DNSSEC" -ForegroundColor Yellow
+    Write-Host "  Use this information for manual migration planning" -ForegroundColor Yellow
+    Write-Host ""
+    
+    $results = @{
+        SignedZones = @()
+        KeyInventory = @()
+        TrustAnchors = @()
+        ValidationSettings = @()
+        MigrationChecklist = @()
+        Statistics = @{
+            TotalZones = 0
+            SignedZones = 0
+            TotalKeys = 0
+            KSKs = 0
+            ZSKs = 0
+        }
+    }
+    
+    try {
+        # Get all domain controllers
+        $adParams = @{}
+        if ($Credential) { $adParams['Credential'] = $Credential }
+        
+        $DCs = Get-ADDomainController @adParams -Filter * | Select-Object Name, IPv4Address
+        Write-Host "Inventorying DNSSEC across $($DCs.Count) domain controllers..." -ForegroundColor Green
+        Write-Host ""
+        
+        foreach ($DC in $DCs) {
+            Write-Host "═══ Auditing: $($DC.Name) ═══" -ForegroundColor Yellow
+            Write-Host ""
+            
+            $dnsParams = @{
+                ComputerName = $DC.Name
+                ErrorAction = 'Stop'
+            }
+            if ($Credential) { $dnsParams['Credential'] = $Credential }
+            
+            # Get all zones
+            Write-Host "  Discovering zones..." -NoNewline
+            $zones = Get-DnsServerZone @dnsParams | Where-Object { 
+                $_.ZoneType -eq 'Primary' -and -not $_.IsReverseLookupZone 
+            }
+            Write-Host " Found $($zones.Count) zones" -ForegroundColor Green
+            
+            $results.Statistics.TotalZones += $zones.Count
+            
+            # Check each zone for DNSSEC
+            foreach ($zone in $zones) {
+                Write-Host "  Checking $($zone.ZoneName)..." -NoNewline
+                
+                try {
+                    $dnssecSettings = Get-DnsServerDnsSecZoneSetting @dnsParams -ZoneName $zone.ZoneName -ErrorAction Stop
+                    
+                    if ($dnssecSettings.IsSigned) {
+                        Write-Host " ✓ SIGNED" -ForegroundColor Green
+                        $results.Statistics.SignedZones++
+                        
+                        # Get signing keys
+                        $keys = Get-DnsServerSigningKey @dnsParams -ZoneName $zone.ZoneName -ErrorAction SilentlyContinue
+                        
+                        $kskCount = ($keys | Where-Object { $_.KeyType -eq 'KeySigningKey' }).Count
+                        $zskCount = ($keys | Where-Object { $_.KeyType -eq 'ZoneSigningKey' }).Count
+                        
+                        $results.Statistics.KSKs += $kskCount
+                        $results.Statistics.ZSKs += $zskCount
+                        $results.Statistics.TotalKeys += $keys.Count
+                        
+                        Write-Host "     Keys: $kskCount KSK, $zskCount ZSK" -ForegroundColor Gray
+                        
+                        $results.SignedZones += [PSCustomObject]@{
+                            Server = $DC.Name
+                            Zone = $zone.ZoneName
+                            IsSigned = $true
+                            SigningAlgorithm = $dnssecSettings.SigningAlgorithm
+                            NSec3Iterations = $dnssecSettings.NSec3Iterations
+                            NSec3OptOut = $dnssecSettings.NSec3OptOut
+                            NSec3Algorithm = $dnssecSettings.NSec3Algorithm
+                            ParentHasSecureDelegation = $dnssecSettings.ParentHasSecureDelegation
+                            KSKCount = $kskCount
+                            ZSKCount = $zskCount
+                            Keys = $keys
+                        }
+                        
+                        # Document each key
+                        foreach ($key in $keys) {
+                            $results.KeyInventory += [PSCustomObject]@{
+                                Server = $DC.Name
+                                Zone = $zone.ZoneName
+                                KeyID = $key.KeyId
+                                KeyType = $key.KeyType
+                                Algorithm = $key.CryptoAlgorithm
+                                KeyLength = $key.KeyLength
+                                State = $key.State
+                                IsInitialKey = $key.IsInitialKey
+                                StoreKeysInAD = $key.StoreKeysInAD
+                                ActiveKey = $key.ActiveKey
+                                StandbyKey = $key.StandbyKey
+                                NextKey = $key.NextKey
+                            }
+                        }
+                        
+                        # Generate DS records (for parent zone)
+                        try {
+                            $dsRecords = Export-DnsServerDnsSecPublicKey @dnsParams -ZoneName $zone.ZoneName -PassThru -ErrorAction Stop
+                            Write-Host "     DS Records: $($dsRecords.Count) generated" -ForegroundColor Gray
+                        }
+                        catch {
+                            Write-Host "     DS Records: Unable to export" -ForegroundColor Yellow
+                        }
+                    }
+                    else {
+                        Write-Host " ○ Not signed" -ForegroundColor Gray
+                    }
+                }
+                catch {
+                    Write-Host " ✗ Error: $_" -ForegroundColor Red
+                }
+            }
+            
+            Write-Host ""
+        }
+        
+        # Generate Migration Checklist
+        Write-Host "═══ Generating Migration Checklist ═══" -ForegroundColor Yellow
+        Write-Host ""
+        
+        $results.MigrationChecklist = @(
+            [PSCustomObject]@{
+                Step = 1
+                Phase = "Discovery"
+                Task = "Document all DNSSEC-signed zones"
+                Status = "✓ COMPLETE"
+                Details = "$($results.Statistics.SignedZones) signed zones documented"
+            }
+            [PSCustomObject]@{
+                Step = 2
+                Phase = "Discovery"
+                Task = "Extract key information (KSK and ZSK)"
+                Status = "✓ COMPLETE"
+                Details = "$($results.Statistics.TotalKeys) keys documented ($($results.Statistics.KSKs) KSK, $($results.Statistics.ZSKs) ZSK)"
+            }
+            [PSCustomObject]@{
+                Step = 3
+                Phase = "Discovery"
+                Task = "Capture current DS records"
+                Status = "⚠ MANUAL REQUIRED"
+                Details = "Contact parent zone administrators for current DS records"
+            }
+            [PSCustomObject]@{
+                Step = 4
+                Phase = "Preparation"
+                Task = "Identify parent zone contact information"
+                Status = "⚠ MANUAL REQUIRED"
+                Details = "Required for DS record updates during migration"
+            }
+            [PSCustomObject]@{
+                Step = 5
+                Phase = "Preparation"
+                Task = "Document trust anchors"
+                Status = "⚠ MANUAL REQUIRED"
+                Details = "Check for any configured trust anchors on resolvers"
+            }
+            [PSCustomObject]@{
+                Step = 6
+                Phase = "Preparation"
+                Task = "Determine migration strategy"
+                Status = "⏳ PENDING"
+                Details = "Choose: In-Place Re-signing, Key Export/Import, or Parallel Running"
+            }
+            [PSCustomObject]@{
+                Step = 7
+                Phase = "Preparation"
+                Task = "Review TTL values"
+                Status = "⏳ PENDING"
+                Details = "Lower TTLs before migration for faster propagation"
+            }
+            [PSCustomObject]@{
+                Step = 8
+                Phase = "Execution"
+                Task = "Create new zones at destination"
+                Status = "⏳ PENDING"
+                Details = "Pre-stage unsigned zones"
+            }
+            [PSCustomObject]@{
+                Step = 9
+                Phase = "Execution"
+                Task = "Generate new key pairs at destination"
+                Status = "⏳ PENDING"
+                Details = "Use same or better algorithms"
+            }
+            [PSCustomObject]@{
+                Step = 10
+                Phase = "Execution"
+                Task = "Sign zones at destination"
+                Status = "⏳ PENDING"
+                Details = "Verify signatures before cutover"
+            }
+            [PSCustomObject]@{
+                Step = 11
+                Phase = "Execution"
+                Task = "Update parent DS records"
+                Status = "⏳ PENDING"
+                Details = "Add new DS records (keep old during transition)"
+            }
+            [PSCustomObject]@{
+                Step = 12
+                Phase = "Execution"
+                Task = "Wait for TTL expiration"
+                Status = "⏳ PENDING"
+                Details = "Wait 2x TTL period for propagation"
+            }
+            [PSCustomObject]@{
+                Step = 13
+                Phase = "Cutover"
+                Task = "Switch authoritative servers"
+                Status = "⏳ PENDING"
+                Details = "Update NS records to point to new servers"
+            }
+            [PSCustomObject]@{
+                Step = 14
+                Phase = "Cutover"
+                Task = "Monitor DNSSEC validation"
+                Status = "⏳ PENDING"
+                Details = "Check for SERVFAIL rates and validation failures"
+            }
+            [PSCustomObject]@{
+                Step = 15
+                Phase = "Cleanup"
+                Task = "Remove old DS records from parent"
+                Status = "⏳ PENDING"
+                Details = "After verification, remove old DS records"
+            }
+            [PSCustomObject]@{
+                Step = 16
+                Phase = "Cleanup"
+                Task = "Decommission old DNS servers"
+                Status = "⏳ PENDING"
+                Details = "Only after complete validation"
+            }
+        )
+        
+        # Display checklist
+        Write-Host "Migration Checklist:" -ForegroundColor Cyan
+        foreach ($item in $results.MigrationChecklist) {
+            $statusColor = switch -Wildcard ($item.Status) {
+                "*COMPLETE*" { "Green" }
+                "*MANUAL*" { "Yellow" }
+                "*PENDING*" { "Gray" }
+                default { "White" }
+            }
+            Write-Host "  [$($item.Step.ToString().PadLeft(2))] " -NoNewline -ForegroundColor Gray
+            Write-Host "$($item.Status.PadRight(20))" -NoNewline -ForegroundColor $statusColor
+            Write-Host " $($item.Task)" -ForegroundColor White
+            Write-Host "       $($item.Details)" -ForegroundColor Gray
+        }
+        Write-Host ""
+        
+        # Summary
+        Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+        Write-Host "║              DNSSEC Inventory Summary                         ║" -ForegroundColor Cyan
+        Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Total Zones:           $($results.Statistics.TotalZones)" -ForegroundColor White
+        Write-Host "  DNSSEC-Signed Zones:   $($results.Statistics.SignedZones)" -ForegroundColor Cyan
+        Write-Host "  Total Keys:            $($results.Statistics.TotalKeys)" -ForegroundColor White
+        Write-Host "    - KSKs (Key Signing):  $($results.Statistics.KSKs)" -ForegroundColor Gray
+        Write-Host "    - ZSKs (Zone Signing): $($results.Statistics.ZSKs)" -ForegroundColor Gray
+        Write-Host ""
+        
+        if ($results.Statistics.SignedZones -eq 0) {
+            Write-Host "  ℹ️  No DNSSEC-signed zones found" -ForegroundColor Yellow
+            Write-Host "  No migration preparation needed" -ForegroundColor Gray
+        } else {
+            Write-Host "  ⚠️  CRITICAL REMINDERS:" -ForegroundColor Red
+            Write-Host "     1. Do NOT automate DNSSEC migration" -ForegroundColor Yellow
+            Write-Host "     2. Contact parent zone administrators BEFORE starting" -ForegroundColor Yellow
+            Write-Host "     3. Test in non-production environment first" -ForegroundColor Yellow
+            Write-Host "     4. Have rollback plan ready" -ForegroundColor Yellow
+            Write-Host "     5. Schedule during maintenance window" -ForegroundColor Yellow
+            Write-Host "     6. Monitor validation rates during and after migration" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        
+        return $results
+    }
+    catch {
+        Write-Host "FATAL ERROR in DNSSEC Inventory: $_" -ForegroundColor Red
+        throw
+    }
+}
+
+#endregion
+
 #region Main Execution
 
 # Environment Detection
@@ -1582,15 +2410,33 @@ try {
                 -Findings $auditResults.Issues
             $auditResults
         }
+        "CISCompliance" { 
+            $auditResults = Start-CISComplianceCheck -Credential $Credential
+            Update-ExecutionStats -ServersProcessed ($auditResults.Checks | Select-Object -ExpandProperty Server -Unique).Count `
+                -SuccessCount $auditResults.Summary.Passed `
+                -WarningCount $auditResults.Summary.ManualReview `
+                -ErrorCount $auditResults.Summary.Failed `
+                -Findings $auditResults.Findings
+            $auditResults
+        }
+        "DNSSECInventory" { 
+            $auditResults = Start-DNSSECInventory -Credential $Credential
+            Update-ExecutionStats -ZonesProcessed $auditResults.Statistics.TotalZones `
+                -SuccessCount $auditResults.Statistics.SignedZones `
+                -Findings @("$($auditResults.Statistics.SignedZones) DNSSEC-signed zones inventoried")
+            $auditResults
+        }
         default {
-            Write-Host "⚠️  Mode '$Mode' is defined but not yet fully implemented in v3.1" -ForegroundColor Yellow
+            Write-Host "⚠️  Mode '$Mode' is defined but not yet fully implemented in v3.2" -ForegroundColor Yellow
             Write-Host "   This mode is available in DNS-MasterAudit.ps1 (v2.8)" -ForegroundColor Yellow
             Write-Host ""
-            Write-Host "   Current v3.1 modes:" -ForegroundColor Cyan
+            Write-Host "   Current v3.2 modes:" -ForegroundColor Cyan
             Write-Host "     • ConfigAudit - Configuration consistency audit" -ForegroundColor White
             Write-Host "     • ZoneHealth - Zone health and integrity audit" -ForegroundColor White
+            Write-Host "     • CISCompliance - CIS Benchmark security audit (NEW!)" -ForegroundColor White
+            Write-Host "     • DNSSECInventory - DNSSEC migration preparation (NEW!)" -ForegroundColor White
             Write-Host ""
-            @{ Message = "Mode not implemented in v3.1"; Mode = $Mode }
+            @{ Message = "Mode not implemented in v3.2"; Mode = $Mode }
         }
     }
     

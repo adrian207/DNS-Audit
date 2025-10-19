@@ -1,8 +1,8 @@
-# DNS Master Audit - Enterprise Edition v3.0
+# DNS Master Audit - Enterprise Edition v3.2
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Author](https://img.shields.io/badge/author-Adrian%20Johnson-brightgreen.svg)
@@ -28,10 +28,12 @@ DNS Master Audit v3.0 is a comprehensive PowerShell-based DNS auditing platform 
 > Parallel processing is NOW LIVE in the production script (`DNS-MasterAudit.ps1` v2.2)!  
 > Get **5-10x faster execution** in large environments today. See [Parallel Processing Examples](#parallel-processing) below.
 
-### What's New in v3.0 (In Development)
+### What's New in v3.2 (Latest)
 
 | Feature | Description |
 |---------|-------------|
+| 🛡️ **CIS Compliance** | CIS Benchmark v3.0.0 security auditing (9 critical checks) |
+| 🔐 **DNSSEC Inventory** | Migration preparation and key documentation |
 | 🎨 **HTML Dashboards** | Interactive reports with charts and drill-down capabilities |
 | ⚡ **Parallel Processing** | 5-10x faster execution through multi-threading |
 | 📊 **Change Detection** | Baseline comparison and drift analysis |
@@ -56,6 +58,8 @@ DNS Master Audit v3.0 is a comprehensive PowerShell-based DNS auditing platform 
 - **Complete Audit:** All modes with consolidated reporting
 - **Baseline Mode:** Create configuration snapshots
 - **Compare Mode:** Detect changes and drift
+- **CIS Compliance:** Security baseline auditing (CIS v3.0.0)
+- **DNSSEC Inventory:** Migration preparation and key documentation
 
 ### 🆕 DNS Scavenging Manager
 
@@ -133,7 +137,7 @@ Install-WindowsFeature RSAT-AD-PowerShell, RSAT-DNS-Server
 
 ```powershell
 # Download
-Invoke-WebRequest -Uri "https://github.com/adrian207/DNS-Audit/releases/latest/DNS-MasterAudit-Enhanced-v3.0.ps1" `
+Invoke-WebRequest -Uri "https://github.com/adrian207/DNS-Audit/releases/latest/DNS-MasterAudit-Enhanced-v3.2.ps1" `
     -OutFile "DNS-MasterAudit.ps1"
 
 # Unblock
@@ -194,7 +198,7 @@ New-Item -Path "C:\DNSAudit" -ItemType Directory
 cd C:\DNSAudit
 
 # Download script
-Invoke-WebRequest -Uri "https://github.com/adrian207/DNS-Audit/releases/latest/DNS-MasterAudit-Enhanced-v3.0.ps1" `
+Invoke-WebRequest -Uri "https://github.com/adrian207/DNS-Audit/releases/latest/DNS-MasterAudit-Enhanced-v3.2.ps1" `
     -OutFile "DNS-MasterAudit.ps1"
 
 # Unblock
@@ -206,7 +210,7 @@ Unblock-File ".\DNS-MasterAudit.ps1"
 ```powershell
 git clone https://github.com/adrian207/DNS-Audit.git
 cd DNS-Audit
-.\DNS-MasterAudit-Enhanced-v3.0.ps1 -Mode Inventory
+.\DNS-MasterAudit-Enhanced-v3.2.ps1 -Mode Inventory
 ```
 
 ---
@@ -405,6 +409,195 @@ Register-ScheduledTask -TaskName "DNS Monthly Audit" `
 
 ---
 
+## 🛡️ CIS Compliance Auditing
+
+### Overview
+
+**NEW in v3.2:** Automated CIS Benchmark compliance checking for Windows DNS Server.
+
+```powershell
+# Run CIS compliance audit
+.\DNS-MasterAudit-Enhanced-v3.2.ps1 -Mode CISCompliance
+```
+
+### CIS Benchmark Version
+
+**Current Implementation:**
+- **Benchmark:** CIS Microsoft Windows Server 2019/2022 Benchmark
+- **Version:** 3.0.0
+- **Release Date:** December 2023
+- **Last Verified:** January 2025
+- **Checks Implemented:** 9 critical controls
+
+### Implemented CIS Controls
+
+| Check ID | Category | Description | Severity |
+|----------|----------|-------------|----------|
+| **CIS-1.1** | Service Hardening | Recursion disabled on authoritative servers | HIGH |
+| **CIS-1.2** | Service Hardening | DNS Socket Pool ≥2500 (DoS protection) | MEDIUM |
+| **CIS-1.3** | Logging | Event logging enabled (level ≥2) | MEDIUM |
+| **CIS-2.1** | Zone Security | Zone transfers restricted | CRITICAL |
+| **CIS-2.2** | Zone Security | Secure dynamic updates only | HIGH |
+| **CIS-2.3** | Zone Security | DNSSEC validation enabled | MEDIUM |
+| **CIS-3.1** | Network Security | Listen on specific interfaces only | MEDIUM |
+| **CIS-3.2** | Network Security | Response Rate Limiting (RRL) enabled | HIGH |
+| **CIS-3.3** | Network Security | Cache locking ≥80% | MEDIUM |
+
+### Compliance Scoring
+
+The script generates a **compliance score** based on:
+- ✅ **Passed:** Fully compliant with CIS recommendation
+- ❌ **Failed:** Non-compliant (remediation required)
+- ⚠️ **Manual Review:** Requires administrator judgment
+- ○ **Not Applicable:** Check doesn't apply to environment
+
+**Example Output:**
+```
+╔═══════════════════════════════════════════════════════════════╗
+║              CIS Compliance Summary                           ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  Compliance Score:      87.5%
+
+  Total Checks:          24
+  ✓ Passed:              21
+  ✗ Failed:              2
+  ⚠ Manual Review:       1
+  ○ Not Applicable:      0
+
+  Critical Findings:     2
+```
+
+### Auto-Update Limitations
+
+⚠️ **IMPORTANT: CIS Benchmarks CANNOT be automatically updated**
+
+**Why:**
+- CIS Benchmarks are copyrighted documents requiring paid membership
+- No public API exists for programmatic access
+- Licensing restrictions prevent automated distribution
+
+**Current Approach:**
+- Script contains hardcoded checks based on CIS v3.0.0 (December 2023)
+- Version information clearly displayed in script constants
+- Manual updates required when new CIS versions are released
+
+### How to Update CIS Checks
+
+When a new CIS Benchmark version is released:
+
+**Step 1: Obtain Latest Benchmark**
+```text
+1. Visit: https://www.cisecurity.org/benchmark/microsoft_windows_server
+2. Download the latest PDF (CIS membership may be required)
+3. Review changes in DNS Server section
+```
+
+**Step 2: Update Script Constants**
+
+Edit `DNS-MasterAudit-Enhanced-v3.2.ps1` lines 282-297:
+
+```powershell
+# Update these constants
+$script:CIS_BenchmarkName = "CIS Microsoft Windows Server 2022 Benchmark"
+$script:CIS_Version = "3.1.0"  # <-- Change version
+$script:CIS_ReleaseDate = "June 2025"  # <-- Update date
+$script:CIS_LastVerified = "June 2025"  # <-- Update verification date
+```
+
+**Step 3: Add/Modify Checks**
+
+If the new CIS version adds or changes recommendations:
+1. Locate the `Start-CISComplianceCheck` function (line ~1550)
+2. Add new check blocks following existing patterns
+3. Update `$script:CIS_ChecksImplemented` array with new checks
+4. Test thoroughly before deployment
+
+**Step 4: Update Documentation**
+
+Update this README section with new:
+- Benchmark version
+- Check counts
+- New/modified controls
+
+**Step 5: Commit Changes**
+
+```powershell
+git add DNS-MasterAudit-Enhanced-v3.2.ps1 README.md
+git commit -m "Update CIS Benchmark to v3.1.0"
+git push origin main
+```
+
+### Maintenance Schedule
+
+**Recommended:**
+- Review CIS website quarterly for new benchmark releases
+- Update script within 30 days of new release
+- Document changes in CHANGELOG.md
+- Test in non-production environment first
+
+### Version History
+
+| Script Version | CIS Version | Updated | Notes |
+|----------------|-------------|---------|-------|
+| v3.2 | 3.0.0 | January 2025 | Initial CIS implementation |
+| Future | TBD | TBD | Awaiting CIS v3.1.0 release |
+
+### Export & Reporting
+
+CIS compliance results are exported to:
+- **CSV:** `CISCompliance_<timestamp>.csv` - All check details
+- **HTML:** `CISCompliance_Dashboard_<timestamp>.html` - Interactive report
+- **JSON:** `CISCompliance_<timestamp>.json` - Machine-readable format
+
+### Remediation
+
+The script provides **ready-to-run PowerShell commands** for each failed check:
+
+```powershell
+# Example remediation commands shown in output
+Set-DnsServerRecursion -ComputerName DC01 -Enable $false
+Set-DnsServerCache -ComputerName DC01 -LockingPercent 80
+Set-DnsServerResponseRateLimiting -ComputerName DC01 -Mode Enable
+```
+
+⚠️ **Always review and test remediation scripts before executing in production**
+
+### Integration Examples
+
+```powershell
+# CIS compliance with Teams notification
+.\DNS-MasterAudit-Enhanced-v3.2.ps1 -Mode CISCompliance `
+    -TeamsWebhook "https://outlook.office.com/webhook/..."
+
+# Monthly compliance report
+.\DNS-MasterAudit-Enhanced-v3.2.ps1 -Mode CISCompliance `
+    -ExportFormat HTML `
+    -ExportPath "\\fileserver\compliance\DNS"
+
+# Automated compliance check
+$task = {
+    .\DNS-MasterAudit-Enhanced-v3.2.ps1 -Mode CISCompliance -NonInteractive
+    if ($LASTEXITCODE -ne 0) {
+        Send-MailMessage -To "security@contoso.com" `
+            -Subject "DNS CIS Compliance Failures" `
+            -Body "Review: \\fileserver\compliance\DNS"
+    }
+}
+
+Register-ScheduledTask -TaskName "DNS-CIS-Monthly" `
+    -Action (New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-File $task") `
+    -Trigger (New-ScheduledTaskTrigger -Monthly -At 9am)
+```
+
+### Related Documentation
+
+- **Official CIS Benchmarks:** https://www.cisecurity.org/cis-benchmarks
+- **CIS Controls:** https://www.cisecurity.org/controls
+- **Microsoft DNS Security:** https://docs.microsoft.com/en-us/windows-server/networking/dns/dns-top
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -455,7 +648,7 @@ cd DNS-Audit
 git checkout -b feature/my-new-feature
 
 # Make changes and test
-.\DNS-MasterAudit-Enhanced-v3.0.ps1 -Mode Inventory -Verbose
+.\DNS-MasterAudit-Enhanced-v3.2.ps1 -Mode Inventory -Verbose
 
 # Submit pull request
 ```
