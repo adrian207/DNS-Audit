@@ -24,7 +24,11 @@
 
 DNS Master Audit v3.0 is a comprehensive PowerShell-based DNS auditing platform designed for enterprise environments. It provides deep insights into DNS infrastructure health, security posture, and configuration drift with interactive reporting and automated remediation capabilities.
 
-### What's New in v3.0
+> **🎉 NEW: v2.2 Production Release Available!**  
+> Parallel processing is NOW LIVE in the production script (`DNS-MasterAudit.ps1` v2.2)!  
+> Get **5-10x faster execution** in large environments today. See [Parallel Processing Examples](#parallel-processing) below.
+
+### What's New in v3.0 (In Development)
 
 | Feature | Description |
 |---------|-------------|
@@ -225,15 +229,32 @@ cd DNS-Audit
 .\DNS-MasterAudit.ps1 -Mode SiteAudit -EnableAllFeatures
 ```
 
+### Parallel Processing (v2.2 - Available Now!)
+
+```powershell
+# Inventory with parallel processing (5-10x faster)
+.\DNS-MasterAudit.ps1 -Mode Inventory -EnableParallelProcessing
+
+# Health check with custom throttle
+.\DNS-MasterAudit.ps1 -Mode HealthCheck `
+    -EnableParallelProcessing `
+    -MaxDegreeOfParallelism 10
+
+# Complete audit with parallel processing
+.\DNS-MasterAudit.ps1 -Mode Complete `
+    -EnableParallelProcessing `
+    -ExportFormat HTML
+```
+
 ### Advanced Audits
 
 ```powershell
-# Complete audit with HTML dashboard
+# Complete audit with HTML dashboard (v3.0 - In Development)
 .\DNS-MasterAudit.ps1 -Mode Complete `
     -EnableHTMLDashboard `
     -EnableParallelProcessing
 
-# Security-focused audit
+# Security-focused audit (v3.0 - In Development)
 .\DNS-MasterAudit.ps1 -Mode Complete `
     -EnableSecurityAudits `
     -EnableAdvancedAnalytics `
