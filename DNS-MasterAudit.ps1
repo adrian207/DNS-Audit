@@ -423,6 +423,8 @@ param(
     [switch]$TestQueryPerformance,
     [Parameter(HelpMessage = "Check AD replication lag")]
     [switch]$CheckReplicationLag,
+    [Parameter(HelpMessage = "Check for cross-site authentication issues (scans netlogon.log on all DCs)")]
+    [switch]$CheckCrossSiteAuth,
     [Parameter(HelpMessage = "Number of DNS queries for performance testing (default: 10)")]
     [ValidateRange(1, 100)]
     [int]$PerformanceTestIterations = 10,
@@ -3128,12 +3130,109 @@ function Start-DNSDiagnostics {
             }
         }
         
+        # Test 3: Cross-Site Authentication Issues
+        if ($CheckCrossSiteAuth) {
+            Write-AuditLog "Checking for cross-site authentication issues..." -Level INFO
+            $diagnostics.CrossSiteAuth = @()
+            $missingSubnets = @()
+            $uniqueIPs = @{}
+            
+            foreach ($dc in $dnsServers) {
+                try {
+                    # Build remote path to netlogon.log
+                    $remotePath = "\\$($dc.Name)\C$\Windows\debug\netlogon.log"
+                    
+                    Write-AuditLog "Scanning $($dc.Name) netlogon.log..." -Level INFO
+                    
+                    # Check if file exists
+                    if (-not (Test-Path $remotePath)) {
+                        Write-AuditLog "Netlogon.log not found on $($dc.Name)" -Level WARNING
+                        continue
+                    }
+                    
+                    # Read the netlogon.log file
+                    $logContent = Get-Content $remotePath -ErrorAction Stop
+                    
+                    # Parse for NO_CLIENT_SITE warnings
+                    # Format: MM/DD HH:MM:SS [CRITICAL] NO_CLIENT_SITE: ClientName IPAddress
+                    $noClientSiteEntries = $logContent | Where-Object { $_ -match "NO_CLIENT_SITE" }
+                    
+                    foreach ($entry in $noClientSiteEntries) {
+                        # Extract IP address and client name from log entry
+                        # Typical format: "10/19 14:30:45 [CRITICAL] NO_CLIENT_SITE: WORKSTATION01 192.168.50.10"
+                        if ($entry -match "NO_CLIENT_SITE:\s+(\S+)\s+([\d\.]+)") {
+                            $clientName = $Matches[1]
+                            $clientIP = $Matches[2]
+                            
+                            # Track unique IPs to avoid duplicates
+                            if (-not $uniqueIPs.ContainsKey($clientIP)) {
+                                $uniqueIPs[$clientIP] = $true
+                                
+                                # Try to determine the correct site for this IP
+                                $suggestedSubnet = "$($clientIP.Split('.')[0..2] -join '.')."
+                                $subnetMask = "255.255.255.0" # Default /24 - can be adjusted
+                                
+                                $diagnostics.CrossSiteAuth += [PSCustomObject]@{
+                                    DC = $dc.Name
+                                    ClientName = $clientName
+                                    ClientIP = $clientIP
+                                    Issue = "Client not in any AD site"
+                                    Impact = "Cross-site authentication, slow logon"
+                                    SuggestedSubnet = "$suggestedSubnet/$subnetMask"
+                                    DetectedDate = Get-Date
+                                }
+                                
+                                # Add to missing subnets list
+                                if (-not ($missingSubnets | Where-Object { $_.Subnet -eq "$suggestedSubnet/$subnetMask" })) {
+                                    $missingSubnets += [PSCustomObject]@{
+                                        Subnet = "$suggestedSubnet"
+                                        SubnetMask = $subnetMask
+                                        AffectedClients = @($clientName)
+                                        AffectedIPs = @($clientIP)
+                                    }
+                                } else {
+                                    $existing = $missingSubnets | Where-Object { $_.Subnet -eq "$suggestedSubnet/$subnetMask" }
+                                    $existing.AffectedClients += $clientName
+                                    $existing.AffectedIPs += $clientIP
+                                }
+                                
+                                # Add remediation command
+                                if ($GenerateRemediationScript) {
+                                    Add-RemediationCommand `
+                                        -Issue "Missing AD subnet for $clientIP ($clientName)" `
+                                        -Command "# Add subnet to AD Sites and Services:`n# New-ADReplicationSubnet -Name '$suggestedSubnet/24' -Site 'SITE_NAME' -Location 'Location Description'" `
+                                        -Description "Client $clientName ($clientIP) is authenticating cross-site. Add subnet to proper AD site."
+                                }
+                            }
+                        }
+                    }
+                    
+                    if ($noClientSiteEntries.Count -gt 0) {
+                        Write-AuditLog "  Found $($noClientSiteEntries.Count) NO_CLIENT_SITE entries on $($dc.Name)" -Level WARNING
+                    } else {
+                        Write-AuditLog "  No cross-site issues on $($dc.Name)" -Level SUCCESS
+                    }
+                    
+                } catch {
+                    Write-AuditLog "Failed to scan netlogon.log on $($dc.Name): $_" -Level WARNING
+                }
+            }
+            
+            $diagnostics.MissingSubnets = $missingSubnets
+            
+            Write-AuditLog "Cross-site authentication check complete" -Level SUCCESS
+            Write-AuditLog "  Unique clients with cross-site issues: $($diagnostics.CrossSiteAuth.Count)" -Level $(if ($diagnostics.CrossSiteAuth.Count -gt 0) { "WARNING" } else { "SUCCESS" })
+            Write-AuditLog "  Missing subnets identified: $($missingSubnets.Count)" -Level $(if ($missingSubnets.Count -gt 0) { "WARNING" } else { "SUCCESS" })
+        }
+        
         # Statistics
         $diagnostics.Statistics = @{
             ServersTested = $dnsServers.Count
             AverageQueryTime = if ($diagnostics.QueryPerformance.Count -gt 0) { [math]::Round(($diagnostics.QueryPerformance.AverageMS | Measure-Object -Average).Average, 2) } else { 0 }
             SlowServers = ($diagnostics.QueryPerformance | Where-Object { $_.Status -eq "SLOW" }).Count
             ReplicationIssues = ($diagnostics.ReplicationLag | Where-Object { $_.Status -in @("WARNING", "CRITICAL") }).Count
+            CrossSiteIssues = if ($CheckCrossSiteAuth) { $diagnostics.CrossSiteAuth.Count } else { 0 }
+            MissingSubnets = if ($CheckCrossSiteAuth) { $diagnostics.MissingSubnets.Count } else { 0 }
             DiagnosticDate = Get-Date
         }
         
@@ -3141,6 +3240,10 @@ function Start-DNSDiagnostics {
         Write-AuditLog "  Average query time: $($diagnostics.Statistics.AverageQueryTime)ms" -Level SUCCESS
         Write-AuditLog "  Slow servers: $($diagnostics.Statistics.SlowServers)" -Level $(if ($diagnostics.Statistics.SlowServers -gt 0) { "WARNING" } else { "SUCCESS" })
         Write-AuditLog "  Replication issues: $($diagnostics.Statistics.ReplicationIssues)" -Level $(if ($diagnostics.Statistics.ReplicationIssues -gt 0) { "WARNING" } else { "SUCCESS" })
+        if ($CheckCrossSiteAuth) {
+            Write-AuditLog "  Cross-site auth issues: $($diagnostics.Statistics.CrossSiteIssues)" -Level $(if ($diagnostics.Statistics.CrossSiteIssues -gt 0) { "WARNING" } else { "SUCCESS" })
+            Write-AuditLog "  Missing subnets: $($diagnostics.Statistics.MissingSubnets)" -Level $(if ($diagnostics.Statistics.MissingSubnets -gt 0) { "WARNING" } else { "SUCCESS" })
+        }
         
         # Export results
         if ($diagnostics.QueryPerformance.Count -gt 0) {
@@ -3149,12 +3252,27 @@ function Start-DNSDiagnostics {
         if ($diagnostics.ReplicationLag.Count -gt 0) {
             Export-AuditData -Data $diagnostics.ReplicationLag -BaseFileName "DNS_ReplicationLag_${script:TimeStamp}" -Format $ExportFormat -Title "AD Replication Status"
         }
+        if ($CheckCrossSiteAuth -and $diagnostics.CrossSiteAuth.Count -gt 0) {
+            Export-AuditData -Data $diagnostics.CrossSiteAuth -BaseFileName "DNS_CrossSiteAuth_Issues_${script:TimeStamp}" -Format $ExportFormat -Title "Cross-Site Authentication Issues"
+        }
+        if ($CheckCrossSiteAuth -and $diagnostics.MissingSubnets.Count -gt 0) {
+            Export-AuditData -Data $diagnostics.MissingSubnets -BaseFileName "DNS_Missing_Subnets_${script:TimeStamp}" -Format $ExportFormat -Title "Missing AD Subnets"
+        }
         
         Export-AuditData -Data $diagnostics.Statistics -BaseFileName "DNS_Diagnostics_Statistics_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Diagnostics Statistics"
         
+        # Build summary message
+        $summaryParts = @("Diagnostics: Avg query ${($diagnostics.Statistics.AverageQueryTime)}ms")
+        $summaryParts += "$($diagnostics.Statistics.SlowServers) slow servers"
+        $summaryParts += "$($diagnostics.Statistics.ReplicationIssues) replication issues"
+        if ($CheckCrossSiteAuth) {
+            $summaryParts += "$($diagnostics.Statistics.CrossSiteIssues) cross-site auth issues"
+            $summaryParts += "$($diagnostics.Statistics.MissingSubnets) missing subnets"
+        }
+        
         return @{
             Diagnostics = $diagnostics
-            Summary = "Diagnostics: Avg query ${($diagnostics.Statistics.AverageQueryTime)}ms, $($diagnostics.Statistics.SlowServers) slow servers, $($diagnostics.Statistics.ReplicationIssues) replication issues"
+            Summary = $summaryParts -join ", "
         }
         
     } catch {
