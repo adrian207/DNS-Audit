@@ -174,8 +174,11 @@ param(
     [Parameter(HelpMessage = "Export directory for reports")]
     [string]$ExportPath = "C:\DNSScavenging",
     
-    [Parameter(HelpMessage = "Credential for remote operations")]
+    [Parameter(HelpMessage = "Credential for remote DNS/AD operations (required for cross-domain/cross-site scenarios)")]
     [PSCredential]$Credential,
+    
+    [Parameter(HelpMessage = "Microsoft Teams webhook URL for notifications")]
+    [string]$TeamsWebhook = "",
     
     [Parameter(HelpMessage = "Skip confirmation prompts")]
     [switch]$Force
@@ -192,6 +195,64 @@ $script:TotalServersProcessed = 0
 #endregion
 
 #region Helper Functions
+
+function Send-TeamsNotification {
+    <#
+    .SYNOPSIS
+        Send notification to Microsoft Teams webhook
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WebhookUrl,
+        
+        [Parameter(Mandatory)]
+        [string]$Title,
+        
+        [Parameter(Mandatory)]
+        [string]$Message,
+        
+        [Parameter()]
+        [ValidateSet("Info", "Success", "Warning", "Error")]
+        [string]$Severity = "Info"
+    )
+    
+    try {
+        $color = switch ($Severity) {
+            "Success" { "00FF00" }
+            "Warning" { "FFA500" }
+            "Error" { "FF0000" }
+            default { "0078D4" }
+        }
+        
+        $body = @{
+            "@type" = "MessageCard"
+            "@context" = "https://schema.org/extensions"
+            "summary" = $Title
+            "themeColor" = $color
+            "title" = $Title
+            "text" = $Message
+            "potentialAction" = @(
+                @{
+                    "@type" = "OpenUri"
+                    "name" = "View Logs"
+                    "targets" = @(
+                        @{
+                            "os" = "default"
+                            "uri" = "file:///$ExportPath"
+                        }
+                    )
+                }
+            )
+        } | ConvertTo-Json -Depth 10
+        
+        Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+        Write-Log "Teams notification sent successfully" -Level SUCCESS
+        
+    } catch {
+        Write-Log "Failed to send Teams notification: $_" -Level WARNING
+    }
+}
 
 function Write-Log {
     param(
@@ -892,10 +953,49 @@ try {
     }
     
     Write-Host "`n✓ DNS Scavenging Manager completed successfully!" -ForegroundColor Green
+    
+    # Send Teams notification on success
+    if ($TeamsWebhook) {
+        $duration = [math]::Round(((Get-Date) - $script:StartTime).TotalMinutes, 2)
+        $severity = if ($script:TotalIssuesFound -gt 0) { "Warning" } else { "Success" }
+        $summary = @"
+**DNS Scavenging Manager Complete**
+
+**Mode:** $Mode
+**Servers Processed:** $script:TotalServersProcessed
+**Zones Processed:** $script:TotalZonesProcessed
+**Issues Found:** $script:TotalIssuesFound
+**Duration:** $duration minutes
+
+**Configuration:**
+- No-Refresh: $NoRefreshInterval days
+- Refresh: $RefreshInterval days
+- Total Wait: $($NoRefreshInterval + $RefreshInterval) days
+"@
+        if ($MasterScavengerServer) {
+            $summary += "`n- **Master Scavenger:** $MasterScavengerServer"
+        }
+        
+        Send-TeamsNotification `
+            -WebhookUrl $TeamsWebhook `
+            -Title "DNS Scavenging Manager - Success" `
+            -Message $summary `
+            -Severity $severity
+    }
 }
 catch {
     Write-Log "Fatal error: $($_.Exception.Message)" -Level ERROR
     Write-Log "Stack trace: $($_.ScriptStackTrace)" -Level ERROR
+    
+    # Send Teams notification on error
+    if ($TeamsWebhook) {
+        Send-TeamsNotification `
+            -WebhookUrl $TeamsWebhook `
+            -Title "DNS Scavenging Manager - ERROR" `
+            -Message "**Fatal Error**`n`nMode: $Mode`nError: $($_.Exception.Message)`n`nCheck logs at: $ExportPath" `
+            -Severity "Error"
+    }
+    
     exit 1
 }
 finally {
