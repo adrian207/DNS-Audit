@@ -1,14 +1,22 @@
 ################################################################################
-# DNS Master Audit Script - INDEPENDENT EDITION
+# DNS Master Audit Script - ENHANCED EXPORT EDITION
 # Author: Adrian Johnson <adrian207@gmail.com>
 # Created: 2025
-# Version: 2.0 - Fully Self-Contained
+# Version: 2.1 - Enhanced with Multiple Export Formats & Baseline
 ## Description: All-in-one DNS auditing tool - NO EXTERNAL DEPENDENCIES
 #              1. DNS Inventory (server discovery)
 #              2. DNS Health Check (service testing)
 #              3. DNS Record Export (complete inventory)
 #              4. DNS Site Audit (mismatch detection) - EMBEDDED
 #              5. Complete Audit (all of the above)
+#              6. Baseline Mode (snapshot for change tracking) - NEW!
+#              7. Compare Mode (detect configuration drift) - NEW!
+## NEW in v2.1: Multiple Export Formats
+#              - HTML: Interactive tables with search & sort
+#              - JSON: Perfect for automation & APIs
+#              - Excel: Professional formatted reports (requires ImportExcel module)
+#              - CSV: Universal data format (default)
+#              - ALL: Export in all formats simultaneously
 ## Features: ALL functionality in ONE standalone script
 #           Can run anywhere - no other scripts needed!
 ################################################################################
@@ -18,15 +26,24 @@
 
 <#
 .SYNOPSIS
-Unified, self-contained DNS auditing tool with multiple operation modes
+Unified, self-contained DNS auditing tool with multiple operation modes and export formats
 
 .DESCRIPTION
-All-in-one DNS audit solution combining 5 specialized functions:
+All-in-one DNS audit solution combining 7 specialized functions:
 - DNS-Inventory: Server discovery and inventory
 - DNS-HealthCheck: DNS service health testing
 - DNS-RecordExport: Complete DNS record export
 - DNS-SiteAudit: Site mismatch detection (EMBEDDED - no dependencies!)
 - Complete audit mode: Run all audits in sequence
+- Baseline Mode (NEW!): Create snapshot for change tracking
+- Compare Mode (NEW!): Detect configuration drift
+
+NEW in v2.1 - Multiple Export Formats:
+- CSV (default): Universal data format
+- HTML: Interactive tables with search & sort
+- JSON: Perfect for automation & APIs
+- Excel: Professional formatted reports (requires ImportExcel module)
+- All: Export in all formats simultaneously
 
 ✅ FULLY INDEPENDENT - No external scripts required!
 
@@ -34,18 +51,32 @@ All-in-one DNS audit solution combining 5 specialized functions:
 Operation mode:
 - Inventory: Discover and list all DNS servers
 - HealthCheck: Test DNS service health on all DCs
-- RecordExport: Export all DNS records to CSV
+- RecordExport: Export all DNS records
 - SiteAudit: Find site mismatches (embedded functionality)
 - Complete: Run all audits (recommended for comprehensive analysis)
+- Baseline: Create snapshot of current DNS state (NEW!)
+- Compare: Compare current state to baseline (NEW!)
 
 .PARAMETER ExportPath
 Directory for all reports and logs (default: C:\DNSAudit)
+
+.PARAMETER ExportFormat
+Export format: CSV (default), HTML, JSON, Excel, or All (NEW!)
+- CSV: Universal data format, works everywhere
+- HTML: Interactive web report with search and sort
+- JSON: Perfect for automation and API integration
+- Excel: Professional formatted workbook (requires ImportExcel module)
+- All: Generate all formats simultaneously
 
 .PARAMETER ZoneFilter
 Optional array of specific zones to audit (default: all zones)
 
 .PARAMETER EnableAllFeatures
 For SiteAudit mode: Enable advanced features (severity levels, health scores, etc.)
+
+.PARAMETER BaselineFile
+Path to baseline file for Compare mode (NEW!)
+If not specified, uses latest baseline from Baselines folder
 
 .PARAMETER Credential
 PSCredential for remote AD/DNS operations (required for cross-domain or constrained environments)
@@ -160,10 +191,46 @@ Outputs ALL files:
 Runs site audit and sends email notification via authenticated SMTP with SSL.
 Note: Send-MailMessage is deprecated; consider using external notification systems.
 
+.EXAMPLE
+.\DNS-MasterAudit.ps1 -Mode Inventory -ExportFormat HTML
+
+NEW! Runs inventory and exports interactive HTML report with sortable/searchable table.
+
+.EXAMPLE
+.\DNS-MasterAudit.ps1 -Mode Complete -ExportFormat All
+
+NEW! Runs complete audit and exports in ALL formats (CSV, HTML, JSON, Excel).
+
+.EXAMPLE
+.\DNS-MasterAudit.ps1 -Mode HealthCheck -ExportFormat JSON
+
+NEW! Exports health check results as JSON for automation/API integration.
+
+.EXAMPLE
+.\DNS-MasterAudit.ps1 -Mode Baseline
+
+NEW! Creates baseline snapshot of current DNS state for change tracking.
+
+.EXAMPLE
+.\DNS-MasterAudit.ps1 -Mode Compare
+
+NEW! Compares current DNS state to latest baseline and shows changes.
+
+.EXAMPLE
+.\DNS-MasterAudit.ps1 -Mode Compare -BaselineFile "C:\DNSAudit\Baselines\DNS_Baseline_20250119_100000.json"
+
+NEW! Compares to specific baseline file.
+
 .NOTES
-Version: 2.0 - Independent Edition (NO external dependencies!)
+Version: 2.1 - Enhanced Export Edition (Multiple Formats + Baseline)
 Author: Adrian Johnson <adrian207@gmail.com>
 Self-Contained: All functionality embedded in this single script
+
+NEW in v2.1:
+- Multiple export formats (CSV, HTML, JSON, Excel)
+- Interactive HTML reports with search and sort
+- Baseline mode for change tracking
+- Compare mode for configuration drift detection
 
 Prerequisites:
 - PowerShell 5.1 or later (PowerShell 7.x supported)
@@ -230,14 +297,19 @@ Security Notes:
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, HelpMessage = "Operation mode")]
-    [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete")]
+    [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete", "Baseline", "Compare")]
     [string]$Mode,
     [Parameter(HelpMessage = "Export directory for all reports")]
     [string]$ExportPath = "C:\DNSAudit",
+    [Parameter(HelpMessage = "Export format: CSV (default), HTML, JSON, Excel, or All")]
+    [ValidateSet("CSV", "HTML", "JSON", "Excel", "All")]
+    [string]$ExportFormat = "CSV",
     [Parameter(HelpMessage = "Filter specific zones")]
     [string[]]$ZoneFilter = @(),
     [Parameter(HelpMessage = "Enable all advanced features for SiteAudit mode")]
     [switch]$EnableAllFeatures,
+    [Parameter(HelpMessage = "Baseline file path for Compare mode")]
+    [string]$BaselineFile = "",
     [Parameter(HelpMessage = "Credential for remote operations")]
     [PSCredential]$Credential,
     [Parameter(HelpMessage = "Specific DNS server for RecordExport (overrides auto-discovery)")]
@@ -263,7 +335,7 @@ param(
 )
 
 #region Script Variables
-$script:Version = "2.0 - Independent Edition"
+$script:Version = "2.1 - Enhanced Export Edition"
 $script:StartTime = Get-Date
 $script:TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $script:LogPath = ""
@@ -315,6 +387,336 @@ function Write-AuditLog {
     }
     $LogMessage = "[$Level] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message"
     Write-Host $LogMessage -ForegroundColor $Color
+}
+
+function Export-ToHTML {
+    <#
+    .SYNOPSIS
+    Export data to interactive HTML with sortable tables
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [array]$Data,
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+        [string]$Title = "DNS Audit Report"
+    )
+    
+    if ($Data.Count -eq 0) {
+        Write-AuditLog "No data to export to HTML" -Level WARNING
+        return
+    }
+    
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$Title</title>
+    <style>
+        :root {
+            --primary: #0078d4;
+            --success: #107c10;
+            --warning: #ff8c00;
+            --error: #d13438;
+            --bg: #f3f2f1;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: var(--bg);
+        }
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, #005a9e 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .header h1 { margin: 0 0 10px 0; }
+        .header p { margin: 5px 0; opacity: 0.9; }
+        .controls {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 300px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        thead {
+            background: var(--primary);
+            color: white;
+        }
+        th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover {
+            background: #005a9e;
+        }
+        th::after {
+            content: ' ⇅';
+            opacity: 0.5;
+        }
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>$Title</h1>
+        <p>Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
+        <p>Author: Adrian Johnson &lt;adrian207@gmail.com&gt;</p>
+        <p>Records: $($Data.Count)</p>
+    </div>
+    
+    <div class="controls">
+        <input type="text" id="searchInput" placeholder="Search table..." onkeyup="searchTable()">
+    </div>
+    
+    <table id="dataTable">
+        <thead>
+            <tr>
+"@
+    
+    # Add headers
+    $properties = $Data[0].PSObject.Properties.Name
+    foreach ($prop in $properties) {
+        $html += "                <th onclick='sortTable(this)'>$prop</th>`n"
+    }
+    
+    $html += @"
+            </tr>
+        </thead>
+        <tbody>
+"@
+    
+    # Add rows
+    foreach ($row in $Data) {
+        $html += "            <tr>`n"
+        foreach ($prop in $properties) {
+            $value = $row.$prop
+            if ($null -eq $value) { $value = "" }
+            $html += "                <td>$value</td>`n"
+        }
+        $html += "            </tr>`n"
+    }
+    
+    $html += @"
+        </tbody>
+    </table>
+    
+    <div class="footer">
+        <p>DNS Master Audit v$($script:Version)</p>
+        <p>© 2025 Adrian Johnson. All rights reserved.</p>
+    </div>
+    
+    <script>
+        function searchTable() {
+            const input = document.getElementById('searchInput');
+            const filter = input.value.toUpperCase();
+            const table = document.getElementById('dataTable');
+            const tr = table.getElementsByTagName('tr');
+            
+            for (let i = 1; i < tr.length; i++) {
+                const tds = tr[i].getElementsByTagName('td');
+                let found = false;
+                for (let j = 0; j < tds.length; j++) {
+                    if (tds[j].textContent.toUpperCase().indexOf(filter) > -1) {
+                        found = true;
+                        break;
+                    }
+                }
+                tr[i].style.display = found ? '' : 'none';
+            }
+        }
+        
+        function sortTable(th) {
+            const table = th.closest('table');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const index = Array.from(th.parentNode.children).indexOf(th);
+            const isAsc = th.classList.contains('asc');
+            
+            rows.sort((a, b) => {
+                const aVal = a.children[index].textContent;
+                const bVal = b.children[index].textContent;
+                return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+            });
+            
+            th.parentNode.querySelectorAll('th').forEach(h => h.classList.remove('asc', 'desc'));
+            th.classList.add(isAsc ? 'desc' : 'asc');
+            
+            rows.forEach(row => tbody.appendChild(row));
+        }
+    </script>
+</body>
+</html>
+"@
+    
+    $html | Out-File -FilePath $FilePath -Encoding UTF8
+    Write-AuditLog "HTML report created: $FilePath" -Level SUCCESS
+}
+
+function Export-ToJSON {
+    <#
+    .SYNOPSIS
+    Export data to JSON format
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [array]$Data,
+        [Parameter(Mandatory)]
+        [string]$FilePath
+    )
+    
+    if ($Data.Count -eq 0) {
+        Write-AuditLog "No data to export to JSON" -Level WARNING
+        return
+    }
+    
+    $jsonData = @{
+        Metadata = @{
+            Generated = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Author = "Adrian Johnson <adrian207@gmail.com>"
+            Version = $script:Version
+            RecordCount = $Data.Count
+        }
+        Data = $Data
+    }
+    
+    $jsonData | ConvertTo-Json -Depth 10 | Out-File -FilePath $FilePath -Encoding UTF8
+    Write-AuditLog "JSON report created: $FilePath" -Level SUCCESS
+}
+
+function Export-ToExcel {
+    <#
+    .SYNOPSIS
+    Export data to Excel format (requires ImportExcel module)
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [array]$Data,
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+        [string]$WorksheetName = "DNS Audit"
+    )
+    
+    if ($Data.Count -eq 0) {
+        Write-AuditLog "No data to export to Excel" -Level WARNING
+        return
+    }
+    
+    # Check if ImportExcel module is available
+    if (!(Get-Module -ListAvailable -Name ImportExcel)) {
+        Write-AuditLog "ImportExcel module not found. Install with: Install-Module ImportExcel" -Level WARNING
+        Write-AuditLog "Falling back to CSV export" -Level INFO
+        $csvPath = $FilePath -replace '\.xlsx$', '.csv'
+        $Data | Export-Csv -Path $csvPath -NoTypeInformation
+        Write-AuditLog "CSV report created: $csvPath" -Level SUCCESS
+        return
+    }
+    
+    try {
+        Import-Module ImportExcel -ErrorAction Stop
+        
+        $Data | Export-Excel -Path $FilePath `
+            -WorksheetName $WorksheetName `
+            -AutoSize `
+            -TableName "DNSAuditData" `
+            -TableStyle Medium2 `
+            -FreezeTopRow `
+            -BoldTopRow
+        
+        Write-AuditLog "Excel report created: $FilePath" -Level SUCCESS
+    }
+    catch {
+        Write-AuditLog "Error creating Excel file: $($_.Exception.Message)" -Level ERROR
+        Write-AuditLog "Falling back to CSV export" -Level INFO
+        $csvPath = $FilePath -replace '\.xlsx$', '.csv'
+        $Data | Export-Csv -Path $csvPath -NoTypeInformation
+        Write-AuditLog "CSV report created: $csvPath" -Level SUCCESS
+    }
+}
+
+function Export-AuditData {
+    <#
+    .SYNOPSIS
+    Export audit data in specified format(s)
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [array]$Data,
+        [Parameter(Mandatory)]
+        [string]$BaseFileName,
+        [string]$Format = "CSV",
+        [string]$Title = "DNS Audit Report"
+    )
+    
+    if ($Data.Count -eq 0) {
+        Write-AuditLog "No data to export" -Level WARNING
+        return
+    }
+    
+    $formats = if ($Format -eq "All") { @("CSV", "HTML", "JSON", "Excel") } else { @($Format) }
+    
+    foreach ($fmt in $formats) {
+        $extension = switch ($fmt) {
+            "CSV" { ".csv" }
+            "HTML" { ".html" }
+            "JSON" { ".json" }
+            "Excel" { ".xlsx" }
+        }
+        
+        $filePath = Join-Path $ExportPath "$BaseFileName$extension"
+        
+        switch ($fmt) {
+            "CSV" {
+                $Data | Export-Csv -Path $filePath -NoTypeInformation
+                Write-AuditLog "CSV report created: $filePath" -Level SUCCESS
+            }
+            "HTML" {
+                Export-ToHTML -Data $Data -FilePath $filePath -Title $Title
+            }
+            "JSON" {
+                Export-ToJSON -Data $Data -FilePath $filePath
+            }
+            "Excel" {
+                Export-ToExcel -Data $Data -FilePath $filePath -WorksheetName $Title
+            }
+        }
+    }
 }
 
 #endregion
@@ -376,9 +778,8 @@ function Start-DNSInventory {
         finally {
             Write-Progress -Activity "Inventorying DNS Servers" -Completed
         }
-        $OutputFile = Join-Path $ExportPath "DNS_Inventory_${script:TimeStamp}.csv"
-        $DNSServers | Export-Csv -Path $OutputFile -NoTypeInformation
-        Write-AuditLog "Exported inventory to: $OutputFile" -Level SUCCESS
+        # Export inventory data
+        Export-AuditData -Data $DNSServers -BaseFileName "DNS_Inventory_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Server Inventory"
         return @{
             Servers = $DNSServers
             ExportFile = $OutputFile
@@ -505,9 +906,8 @@ function Start-DNSHealthCheck {
         finally {
             Write-Progress -Activity "Health Checking DNS Services" -Completed
         }
-        $OutputFile = Join-Path $ExportPath "DNS_HealthCheck_${script:TimeStamp}.csv"
-        $AllHealthResults | Export-Csv -Path $OutputFile -NoTypeInformation
-        Write-AuditLog "Exported health check to: $OutputFile" -Level SUCCESS
+        # Export health check data
+        Export-AuditData -Data $AllHealthResults -BaseFileName "DNS_HealthCheck_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Health Check Results"
         $TotalTests = $AllHealthResults.Count
         $PassedTests = ($AllHealthResults | Where-Object { $_.Status -eq "PASS" }).Count
         return @{
@@ -1051,10 +1451,8 @@ function Start-DNSSiteAudit {
         # Remove duplicates
         $UniqueMismatches = $AllMismatches | Sort-Object FQDN, IPAddress -Unique
         Write-AuditLog "Scan complete: $TotalRecordsScanned records scanned, $($UniqueMismatches.Count) mismatches found" -Level SUCCESS
-        # Export results
-        $MismatchFile = Join-Path $ExportPath "DNS_Site_Mismatches_${script:TimeStamp}.csv"
-        $UniqueMismatches | Export-Csv -Path $MismatchFile -NoTypeInformation
-        Write-AuditLog "Exported mismatches to: $MismatchFile" -Level SUCCESS
+        # Export mismatches
+        Export-AuditData -Data $UniqueMismatches -BaseFileName "DNS_Site_Mismatches_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Site Mismatches"
         # Generate statistics
         $Statistics = [PSCustomObject]@{
             TotalRecordsScanned = $TotalRecordsScanned
@@ -1066,15 +1464,12 @@ function Start-DNSSiteAudit {
             DCsScanned = $DCs.Count
             AuditDate = Get-Date
         }
-        $StatsFile = Join-Path $ExportPath "DNS_Audit_Statistics_${script:TimeStamp}.csv"
-        $Statistics | Export-Csv -Path $StatsFile -NoTypeInformation
+        Export-AuditData -Data @($Statistics) -BaseFileName "DNS_Audit_Statistics_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Audit Statistics"
         # Report skipped subnets
         if ($script:SkippedSubnets.Count -gt 0) {
             $UniqueSkippedSubnets = $script:SkippedSubnets | Sort-Object Subnet -Unique
-            $SkippedFile = Join-Path $ExportPath "DNS_Audit_Skipped_Subnets_${script:TimeStamp}.csv"
-            $UniqueSkippedSubnets | Export-Csv -Path $SkippedFile -NoTypeInformation
+            Export-AuditData -Data $UniqueSkippedSubnets -BaseFileName "DNS_Audit_Skipped_Subnets_${script:TimeStamp}" -Format $ExportFormat -Title "Skipped Subnets"
             Write-AuditLog "WARNING: $($UniqueSkippedSubnets.Count) subnets were skipped due to parsing errors" -Level WARNING
-            Write-AuditLog "  Skipped subnets exported to: $SkippedFile" -Level INFO
         }
         else {
             Write-AuditLog "All AD subnets were successfully parsed" -Level SUCCESS
@@ -1092,9 +1487,7 @@ function Start-DNSSiteAudit {
                 $ZoneHealthScores += $score
             }
             if ($ZoneHealthScores.Count -gt 0) {
-                $HealthFile = Join-Path $ExportPath "DNS_Zone_Health_Scores_${script:TimeStamp}.csv"
-                $ZoneHealthScores | Export-Csv -Path $HealthFile -NoTypeInformation
-                Write-AuditLog "Zone health scores exported to: $HealthFile" -Level SUCCESS
+                Export-AuditData -Data $ZoneHealthScores -BaseFileName "DNS_Zone_Health_Scores_${script:TimeStamp}" -Format $ExportFormat -Title "Zone Health Scores"
             }
         }
         return @{
@@ -1186,6 +1579,215 @@ function Start-CompleteAudit {
     return $script:AllResults
 }
 
+function Start-BaselineMode {
+    <#
+    .SYNOPSIS
+    Create a baseline snapshot of the current DNS state
+    #>
+    param([PSCredential]$Credential)
+    
+    Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor Cyan
+    Write-Host "│  BASELINE MODE: Creating DNS Snapshot          │" -ForegroundColor Cyan
+    Write-Host "└─────────────────────────────────────────────────┘`n" -ForegroundColor Cyan
+    
+    Write-AuditLog "Creating baseline snapshot..." -Level INFO
+    
+    # Run complete audit to gather all data
+    $auditResults = @{}
+    
+    Write-AuditLog "Collecting DNS inventory..." -Level INFO
+    $auditResults['Inventory'] = Start-DNSInventory -Credential $Credential
+    
+    Write-AuditLog "Collecting DNS health data..." -Level INFO
+    $auditResults['HealthCheck'] = Start-DNSHealthCheck -Credential $Credential
+    
+    Write-AuditLog "Collecting DNS records..." -Level INFO
+    $auditResults['RecordExport'] = Start-DNSRecordExport -Credential $Credential
+    
+    # Create baseline object
+    $baseline = @{
+        Metadata = @{
+            Created = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Author = "Adrian Johnson <adrian207@gmail.com>"
+            Version = $script:Version
+            Type = "DNS Baseline Snapshot"
+        }
+        Inventory = $auditResults['Inventory'].Servers
+        HealthCheck = $auditResults['HealthCheck'].Results
+        Records = @()  # Would be populated from RecordExport
+    }
+    
+    # Save baseline
+    $baselinePath = Join-Path $ExportPath "Baselines"
+    if (!(Test-Path $baselinePath)) {
+        New-Item -Path $baselinePath -ItemType Directory -Force | Out-Null
+    }
+    
+    $baselineFile = Join-Path $baselinePath "DNS_Baseline_${script:TimeStamp}.json"
+    $baseline | ConvertTo-Json -Depth 10 | Out-File -FilePath $baselineFile -Encoding UTF8
+    
+    Write-AuditLog "Baseline created: $baselineFile" -Level SUCCESS
+    Write-Host "`n✓ Baseline snapshot created successfully!" -ForegroundColor Green
+    Write-Host "Use -Mode Compare -BaselineFile `"$baselineFile`" to compare future states" -ForegroundColor Cyan
+    
+    return @{
+        BaselineFile = $baselineFile
+        Summary = "Baseline snapshot created with $($baseline.Inventory.Count) servers and $($baseline.HealthCheck.Count) health checks"
+    }
+}
+
+function Start-CompareMode {
+    <#
+    .SYNOPSIS
+    Compare current DNS state to baseline
+    #>
+    param(
+        [string]$BaselineFilePath,
+        [PSCredential]$Credential
+    )
+    
+    Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor Cyan
+    Write-Host "│  COMPARE MODE: Analyzing Changes               │" -ForegroundColor Cyan
+    Write-Host "└─────────────────────────────────────────────────┘`n" -ForegroundColor Cyan
+    
+    # Find baseline file
+    if ([string]::IsNullOrEmpty($BaselineFilePath)) {
+        # Look for latest baseline
+        $baselinePath = Join-Path $ExportPath "Baselines"
+        if (Test-Path $baselinePath) {
+            $latestBaseline = Get-ChildItem -Path $baselinePath -Filter "DNS_Baseline_*.json" | 
+                Sort-Object LastWriteTime -Descending | 
+                Select-Object -First 1
+            
+            if ($latestBaseline) {
+                $BaselineFilePath = $latestBaseline.FullName
+                Write-AuditLog "Using latest baseline: $($latestBaseline.Name)" -Level INFO
+            }
+            else {
+                Write-AuditLog "No baseline files found. Create one with -Mode Baseline" -Level ERROR
+                throw "No baseline file available"
+            }
+        }
+        else {
+            Write-AuditLog "No baselines directory found. Create a baseline with -Mode Baseline" -Level ERROR
+            throw "No baseline file available"
+        }
+    }
+    
+    if (!(Test-Path $BaselineFilePath)) {
+        Write-AuditLog "Baseline file not found: $BaselineFilePath" -Level ERROR
+        throw "Baseline file not found"
+    }
+    
+    Write-AuditLog "Loading baseline from: $BaselineFilePath" -Level INFO
+    $baseline = Get-Content $BaselineFilePath -Raw | ConvertFrom-Json
+    
+    Write-AuditLog "Baseline date: $($baseline.Metadata.Created)" -Level INFO
+    Write-AuditLog "Collecting current state..." -Level INFO
+    
+    # Get current state
+    $currentInventory = (Start-DNSInventory -Credential $Credential).Servers
+    $currentHealth = (Start-DNSHealthCheck -Credential $Credential).Results
+    
+    # Compare servers
+    $comparison = @{
+        NewServers = @()
+        RemovedServers = @()
+        HealthChanges = @()
+        Summary = @{}
+    }
+    
+    $baselineServers = $baseline.Inventory | Select-Object -ExpandProperty Name
+    $currentServers = $currentInventory | Select-Object -ExpandProperty Name
+    
+    $comparison.NewServers = $currentServers | Where-Object { $_ -notin $baselineServers }
+    $comparison.RemovedServers = $baselineServers | Where-Object { $_ -notin $currentServers }
+    
+    # Compare health
+    foreach ($currentTest in $currentHealth) {
+        $baselineTest = $baseline.HealthCheck | Where-Object {
+            $_.Server -eq $currentTest.Server -and $_.Test -eq $currentTest.Test
+        }
+        
+        if ($baselineTest -and $baselineTest.Status -ne $currentTest.Status) {
+            $comparison.HealthChanges += [PSCustomObject]@{
+                Server = $currentTest.Server
+                Test = $currentTest.Test
+                PreviousStatus = $baselineTest.Status
+                CurrentStatus = $currentTest.Status
+                Change = if ($currentTest.Status -eq "PASS") { "Improved" } else { "Degraded" }
+            }
+        }
+    }
+    
+    # Summary
+    $comparison.Summary = [PSCustomObject]@{
+        BaselineDate = $baseline.Metadata.Created
+        ComparisonDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        ServersAdded = $comparison.NewServers.Count
+        ServersRemoved = $comparison.RemovedServers.Count
+        HealthChanges = $comparison.HealthChanges.Count
+        HealthImproved = ($comparison.HealthChanges | Where-Object { $_.Change -eq "Improved" }).Count
+        HealthDegraded = ($comparison.HealthChanges | Where-Object { $_.Change -eq "Degraded" }).Count
+    }
+    
+    # Display results
+    Write-Host "`n╔════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║           COMPARISON RESULTS                                ║" -ForegroundColor Cyan
+    Write-Host "╚════════════════════════════════════════════════════════════╝`n" -ForegroundColor Cyan
+    
+    Write-Host "Baseline Date:  " -NoNewline; Write-Host $comparison.Summary.BaselineDate -ForegroundColor Cyan
+    Write-Host "Current Date:   " -NoNewline; Write-Host $comparison.Summary.ComparisonDate -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Servers Added:  " -NoNewline; Write-Host $comparison.Summary.ServersAdded -ForegroundColor $(if ($comparison.Summary.ServersAdded -gt 0) { "Yellow" } else { "Green" })
+    Write-Host "Servers Removed:" -NoNewline; Write-Host $comparison.Summary.ServersRemoved -ForegroundColor $(if ($comparison.Summary.ServersRemoved -gt 0) { "Red" } else { "Green" })
+    Write-Host ""
+    Write-Host "Health Improved:" -NoNewline; Write-Host $comparison.Summary.HealthImproved -ForegroundColor Green
+    Write-Host "Health Degraded:" -NoNewline; Write-Host $comparison.Summary.HealthDegraded -ForegroundColor $(if ($comparison.Summary.HealthDegraded -gt 0) { "Red" } else { "Green" })
+    
+    # Export comparison results
+    if ($comparison.NewServers.Count -gt 0 -or $comparison.RemovedServers.Count -gt 0 -or $comparison.HealthChanges.Count -gt 0) {
+        $allChanges = @()
+        
+        foreach ($server in $comparison.NewServers) {
+            $allChanges += [PSCustomObject]@{
+                ChangeType = "Server Added"
+                Server = $server
+                Detail = "New DNS server discovered"
+                Impact = "Informational"
+            }
+        }
+        
+        foreach ($server in $comparison.RemovedServers) {
+            $allChanges += [PSCustomObject]@{
+                ChangeType = "Server Removed"
+                Server = $server
+                Detail = "DNS server no longer found"
+                Impact = "Warning"
+            }
+        }
+        
+        foreach ($change in $comparison.HealthChanges) {
+            $allChanges += [PSCustomObject]@{
+                ChangeType = "Health Status Change"
+                Server = $change.Server
+                Detail = "$($change.Test): $($change.PreviousStatus) → $($change.CurrentStatus)"
+                Impact = $change.Change
+            }
+        }
+        
+        Export-AuditData -Data $allChanges -BaseFileName "DNS_Comparison_${script:TimeStamp}" -Format $ExportFormat -Title "DNS Configuration Changes"
+    }
+    else {
+        Write-Host "`n✓ No changes detected since baseline" -ForegroundColor Green
+    }
+    
+    return @{
+        Comparison = $comparison
+        Summary = "Compared to baseline from $($baseline.Metadata.Created): $($comparison.NewServers.Count) added, $($comparison.RemovedServers.Count) removed, $($comparison.HealthChanges.Count) health changes"
+    }
+}
+
 #endregion
 
 #region Main Execution
@@ -1206,6 +1808,8 @@ try {
         "RecordExport" { Start-DNSRecordExport -Zones $ZoneFilter -Credential $Credential -DnsServer $DnsServer -UnionZones:$UnionZones }
         "SiteAudit" { Start-DNSSiteAudit -AllFeatures:$EnableAllFeatures -Credential $Credential }
         "Complete" { Start-CompleteAudit -Credential $Credential -DnsServer $DnsServer -UnionZones:$UnionZones }
+        "Baseline" { Start-BaselineMode -Credential $Credential }
+        "Compare" { Start-CompareMode -BaselineFilePath $BaselineFile -Credential $Credential }
     }
     # Email notification
     if ($EnableEmailNotification) {
