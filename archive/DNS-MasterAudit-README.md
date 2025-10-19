@@ -261,8 +261,7 @@ If you were using the old dependent version:
 
 ## 📞 Support
 
-**Author:** Adrian Johnson  
-**Email:** adrian207@gmail.com  
+**Author:** Adrian Johnson <adrian207@gmail.com>  
 **Version:** 2.0 - Independent Edition
 
 ---

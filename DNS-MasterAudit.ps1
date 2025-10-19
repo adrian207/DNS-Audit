@@ -1,8 +1,8 @@
 ################################################################################
-# DNS Master Audit Script - PARALLEL PROCESSING EDITION
+# DNS Master Audit Script - ENTERPRISE EDITION
 # Author: Adrian Johnson <adrian207@gmail.com>
 # Created: 2025
-# Version: 2.2 - Parallel Processing for 5-10x Performance
+# Version: 2.5 - Enterprise Features & Advanced Analytics
 ## Description: All-in-one DNS auditing tool - NO EXTERNAL DEPENDENCIES
 #              1. DNS Inventory (server discovery)
 #              2. DNS Health Check (service testing)
@@ -11,18 +11,25 @@
 #              5. Complete Audit (all of the above)
 #              6. Baseline Mode (snapshot for change tracking)
 #              7. Compare Mode (detect configuration drift)
-## NEW in v2.2: Parallel Processing Engine
+#              8. Analytics Mode (stale records, duplicates, PTR validation) - NEW!
+#              9. Security Mode (DNSSEC, zone transfer audits) - NEW!
+#              10. Diagnostics Mode (performance, replication lag) - NEW!
+## NEW in v2.5: Enterprise Features
+#              - Advanced analytics (stale records, duplicate IPs, PTR validation)
+#              - Security audits (DNSSEC validation, zone transfer checks)
+#              - Enhanced diagnostics (query performance, replication lag)
+#              - Remediation script generation (automated fix scripts)
+#              - Enterprise integration (Teams, Slack, SIEM/Syslog)
+#              - Configuration profiles (template-based audits)
+## v2.2 Features: Parallel Processing Engine
 #              - PowerShell runspace pools for true parallelism
 #              - 5-10x faster DC queries in large environments
 #              - Configurable throttle (1-20 concurrent operations)
-#              - Intelligent error handling per thread
-#              - Automatic sequential fallback if disabled
 ## v2.1 Features: Multiple Export Formats
 #              - HTML: Interactive tables with search & sort
 #              - JSON: Perfect for automation & APIs
 #              - Excel: Professional formatted reports (requires ImportExcel module)
 #              - CSV: Universal data format (default)
-#              - ALL: Export in all formats simultaneously
 ## Features: ALL functionality in ONE standalone script
 #           Can run anywhere - no other scripts needed!
 ################################################################################
@@ -336,7 +343,7 @@ Security Notes:
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, HelpMessage = "Operation mode")]
-    [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete", "Baseline", "Compare")]
+    [ValidateSet("Inventory", "HealthCheck", "RecordExport", "SiteAudit", "Complete", "Baseline", "Compare", "Analytics", "Security", "Diagnostics")]
     [string]$Mode,
     [Parameter(HelpMessage = "Export directory for all reports")]
     [string]$ExportPath = "C:\DNSAudit",

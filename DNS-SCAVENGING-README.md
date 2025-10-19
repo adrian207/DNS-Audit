@@ -419,8 +419,7 @@ Set-DnsServerZoneAging -Name "problem-zone.com" -Aging $false
 
 ## 📞 Support
 
-**Author:** Adrian Johnson  
-**Email:** adrian207@gmail.com  
+**Author:** Adrian Johnson <adrian207@gmail.com>  
 **Documentation:** See `docs/DNS-SCAVENGING-GUIDE.md` for complete guide
 
 ---

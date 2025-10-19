@@ -491,8 +491,7 @@ After running Complete mode, you'll have answered:
 
 ## 📞 Support
 
-**Author:** Adrian Johnson  
-**Email:** adrian207@gmail.com  
+**Author:** Adrian Johnson <adrian207@gmail.com>  
 **Script:** DNS-MasterAudit.ps1 v1.0 - Unified Edition
 
 ---

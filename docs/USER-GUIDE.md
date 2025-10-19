@@ -1209,8 +1209,7 @@ A: Yes, but some features (like remediation script generation) may be limited.
 - Discussions: https://github.com/adrian207/DNS-Audit/discussions
 
 **Contact:**
-- Author: Adrian Johnson
-- Email: adrian207@gmail.com
+- Author: Adrian Johnson <adrian207@gmail.com>
 - GitHub: @adrian207
 
 ### Reporting Issues
