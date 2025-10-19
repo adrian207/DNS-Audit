@@ -53,6 +53,17 @@ DNS Master Audit v3.0 is a comprehensive PowerShell-based DNS auditing platform 
 - **Baseline Mode:** Create configuration snapshots
 - **Compare Mode:** Detect changes and drift
 
+### 🆕 DNS Scavenging Manager
+
+**NEW!** Comprehensive DNS scavenging analysis and configuration tool:
+- **Analyze Mode:** Audit current scavenging configuration
+- **Configure Mode:** Apply scavenging settings across all DNS servers
+- **Report Mode:** Generate detailed CSV reports
+- **3-Day Aggressive Cleanup:** Or any custom interval (7+7 Microsoft default)
+- **Safety Features:** WhatIf, confirmations, zone exclusions, detailed logging
+
+See: [`DNS-SCAVENGING-README.md`](./DNS-SCAVENGING-README.md)
+
 ### Advanced Capabilities
 
 #### 📊 Interactive Dashboards
