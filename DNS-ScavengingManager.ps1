@@ -56,9 +56,19 @@ Array of zone names to exclude from scavenging configuration
 
 .PARAMETER EnableServerScavenging
 Enable automatic scavenging on DNS servers
+IMPORTANT: Microsoft best practice is to enable on ONLY ONE server!
+Use -MasterScavengerServer to designate which server
+
+.PARAMETER MasterScavengerServer
+Designate a single DNS server as the master scavenger (Microsoft best practice)
+If not specified, will prompt to select from available servers
+Only this server will have scavenging enabled; others will be disabled
+
+.PARAMETER DisableOtherServers
+Disable scavenging on all servers except the master scavenger (recommended)
 
 .PARAMETER ScavengingInterval
-How often servers run scavenging (default: 7 days)
+How often the master server runs scavenging (default: 168 hours = 7 days)
 
 .PARAMETER ExportPath
 Directory for reports and logs (default: C:\DNSScavenging)
@@ -81,12 +91,16 @@ Analyze current scavenging configuration
 Preview applying 3-day scavenging intervals (aggressive cleanup)
 
 .EXAMPLE
-.\DNS-ScavengingManager.ps1 -Mode Configure -ApplyToAllZones -EnableServerScavenging
-Apply Microsoft best practice settings (7+7 days) to all zones and enable server scavenging
+.\DNS-ScavengingManager.ps1 -Mode Configure -ApplyToAllZones -EnableServerScavenging -MasterScavengerServer "DC01"
+Apply Microsoft best practice: 7+7 days to all zones and enable scavenging ONLY on DC01
+
+.EXAMPLE
+.\DNS-ScavengingManager.ps1 -Mode Configure -NoRefreshInterval 3 -RefreshInterval 3 -ApplyToAllZones -EnableServerScavenging -MasterScavengerServer "DC01" -DisableOtherServers
+Apply aggressive 3-day scavenging with DC01 as master scavenger, disable others
 
 .EXAMPLE
 .\DNS-ScavengingManager.ps1 -Mode Configure -NoRefreshInterval 3 -RefreshInterval 3 -ApplyToAllZones -Force
-Apply aggressive 3-day scavenging to all zones without prompts
+Apply aggressive 3-day scavenging to zone aging only (no server scavenging changes)
 
 .EXAMPLE
 .\DNS-ScavengingManager.ps1 -Mode GenerateScript -NoRefreshInterval 3 -RefreshInterval 3
@@ -95,6 +109,18 @@ Generate a remediation script for review and execution
 .NOTES
 Author: Adrian Johnson <adrian207@gmail.com>
 Version: 1.0.0
+
+CRITICAL: MICROSOFT BEST PRACTICE - SINGLE MASTER SCAVENGER
+⚠️ Enable server scavenging on ONLY ONE DNS server!
+⚠️ Multiple servers scavenging simultaneously can cause race conditions
+⚠️ Use -MasterScavengerServer to designate ONE server
+⚠️ Recommended: PDC Emulator or most reliable DNS server
+
+Why only one server?
+- Prevents race conditions and conflicts
+- Ensures consistent scavenging behavior
+- Avoids records being evaluated multiple times
+- One server can scavenge all zones across the domain
 
 IMPORTANT CONSIDERATIONS:
 - Test in non-production first
@@ -105,6 +131,7 @@ IMPORTANT CONSIDERATIONS:
 
 SAFETY FEATURES:
 - WhatIf support for preview
+- Single master scavenger enforcement
 - Backup of current settings
 - Detailed logging
 - Zone exclusion support
@@ -133,6 +160,12 @@ param(
     
     [Parameter(HelpMessage = "Enable automatic scavenging on DNS servers")]
     [switch]$EnableServerScavenging,
+    
+    [Parameter(HelpMessage = "Designate a single DNS server as the master scavenger (Microsoft best practice)")]
+    [string]$MasterScavengerServer = "",
+    
+    [Parameter(HelpMessage = "Disable scavenging on all servers except the master scavenger")]
+    [switch]$DisableOtherServers,
     
     [Parameter(HelpMessage = "Server scavenging interval in hours (default: 168 = 7 days)")]
     [ValidateRange(1, 8760)]
@@ -416,6 +449,22 @@ function Show-AnalysisSummary {
     Write-Host "  Enabled:  " -NoNewline; Write-Host $Analysis.Summary.ServersWithScavengingEnabled -ForegroundColor Green
     Write-Host "  Disabled: " -NoNewline; Write-Host $Analysis.Summary.ServersWithScavengingDisabled -ForegroundColor $(if ($Analysis.Summary.ServersWithScavengingDisabled -gt 0) { "Red" } else { "Green" })
     
+    # Check for multiple servers with scavenging enabled (Microsoft best practice violation)
+    if ($Analysis.Summary.ServersWithScavengingEnabled -gt 1) {
+        Write-Host "`n  ⚠️  CRITICAL: Multiple servers have scavenging enabled!" -ForegroundColor Red
+        Write-Host "  Microsoft best practice: Enable scavenging on ONLY ONE server" -ForegroundColor Red
+        Write-Host "  Risk: Race conditions, inconsistent behavior, duplicate deletions" -ForegroundColor Red
+        Write-Host "`n  Servers with scavenging enabled:" -ForegroundColor Yellow
+        $Analysis.ServerSettings | Where-Object { $_.ScavengingEnabled } | ForEach-Object {
+            Write-Host "    • $($_.ServerName)" -ForegroundColor Yellow
+        }
+        Write-Host "`n  Recommendation: Use -MasterScavengerServer and -DisableOtherServers" -ForegroundColor Cyan
+    }
+    elseif ($Analysis.Summary.ServersWithScavengingEnabled -eq 1) {
+        $masterServer = ($Analysis.ServerSettings | Where-Object { $_.ScavengingEnabled }).ServerName
+        Write-Host "  ✓ Single master scavenger: $masterServer (Best Practice)" -ForegroundColor Green
+    }
+    
     Write-Host "`nZONE AGING:" -ForegroundColor Yellow
     Write-Host "  Enabled:      " -NoNewline; Write-Host $Analysis.Summary.ZonesWithAgingEnabled -ForegroundColor Green
     Write-Host "  Disabled:     " -NoNewline; Write-Host $Analysis.Summary.ZonesWithAgingDisabled -ForegroundColor $(if ($Analysis.Summary.ZonesWithAgingDisabled -gt 0) { "Red" } else { "Green" })
@@ -636,28 +685,97 @@ function Invoke-ScavengingConfiguration {
     
     Write-Log "`nApplying scavenging configuration..." -Level INFO
     
-    # Configure server scavenging
+    # Configure server scavenging - SINGLE MASTER SCAVENGER (Microsoft Best Practice)
     if ($EnableServerScavenging) {
-        Write-Log "Configuring server scavenging..." -Level INFO
+        Write-Host "`n╔════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+        Write-Host "║  MICROSOFT BEST PRACTICE: SINGLE MASTER SCAVENGER         ║" -ForegroundColor Yellow
+        Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+        Write-Log "Configuring SINGLE master scavenger (Microsoft best practice)..." -Level INFO
         
-        foreach ($server in $Analysis.ServerSettings | Where-Object { !$_.ScavengingEnabled }) {
-            if ($PSCmdlet.ShouldProcess($server.ServerName, "Enable Server Scavenging")) {
-                try {
-                    $dnsParams = @{
-                        ComputerName = $server.ServerName
-                        ScavengingState = $true
-                        ScavengingInterval = (New-TimeSpan -Hours $ScavengingInterval)
-                        ErrorAction = 'Stop'
+        # Determine master scavenger server
+        if ([string]::IsNullOrEmpty($MasterScavengerServer)) {
+            Write-Host "`n⚠️  No master scavenger server specified!" -ForegroundColor Yellow
+            Write-Host "Microsoft recommends enabling scavenging on ONLY ONE server." -ForegroundColor Yellow
+            Write-Host "`nAvailable DNS servers:" -ForegroundColor Cyan
+            
+            $serverList = $Analysis.ServerSettings
+            for ($i = 0; $i -lt $serverList.Count; $i++) {
+                $status = if ($serverList[$i].ScavengingEnabled) { "[CURRENTLY ENABLED]" } else { "[DISABLED]" }
+                Write-Host "  $($i+1). $($serverList[$i].ServerName) $status" -ForegroundColor White
+            }
+            
+            Write-Host "`nRecommendation: Choose PDC Emulator or most reliable DNS server" -ForegroundColor Yellow
+            
+            if (!$Force -and !$WhatIfPreference) {
+                do {
+                    $selection = Read-Host "`nSelect master scavenger (1-$($serverList.Count)) or press Enter to cancel"
+                    if ([string]::IsNullOrEmpty($selection)) {
+                        Write-Log "Master scavenger selection cancelled - skipping server scavenging configuration" -Level WARNING
+                        return
                     }
-                    if ($Credential) { $dnsParams['Credential'] = $Credential }
-                    
-                    Set-DnsServerScavenging @dnsParams
-                    Write-Log "  ✓ $($server.ServerName) - Server scavenging enabled" -Level SUCCESS
+                } while ($selection -notmatch '^\d+$' -or [int]$selection -lt 1 -or [int]$selection -gt $serverList.Count)
+                
+                $MasterScavengerServer = $serverList[[int]$selection - 1].ServerName
+            }
+            else {
+                # Auto-select first server in WhatIf or Force mode
+                $MasterScavengerServer = $serverList[0].ServerName
+                Write-Log "Auto-selected master scavenger: $MasterScavengerServer (WhatIf/Force mode)" -Level INFO
+            }
+        }
+        
+        Write-Log "Master Scavenger Server: $MasterScavengerServer" -Level SUCCESS
+        
+        # Enable scavenging ONLY on master server
+        if ($PSCmdlet.ShouldProcess($MasterScavengerServer, "Enable Server Scavenging as MASTER")) {
+            try {
+                $dnsParams = @{
+                    ComputerName = $MasterScavengerServer
+                    ScavengingState = $true
+                    ScavengingInterval = (New-TimeSpan -Hours $ScavengingInterval)
+                    ErrorAction = 'Stop'
                 }
-                catch {
-                    Write-Log "  ✗ $($server.ServerName) - Failed: $($_.Exception.Message)" -Level ERROR
+                if ($Credential) { $dnsParams['Credential'] = $Credential }
+                
+                Set-DnsServerScavenging @dnsParams
+                Write-Log "  ✓ $MasterScavengerServer - MASTER SCAVENGER enabled" -Level SUCCESS
+                Write-Host "  ✓ Master scavenger configured successfully!" -ForegroundColor Green
+            }
+            catch {
+                Write-Log "  ✗ $MasterScavengerServer - Failed: $($_.Exception.Message)" -Level ERROR
+            }
+        }
+        
+        # Disable scavenging on other servers if requested
+        if ($DisableOtherServers) {
+            Write-Log "Disabling scavenging on all other servers..." -Level INFO
+            
+            $otherServers = $Analysis.ServerSettings | Where-Object { 
+                $_.ServerName -ne $MasterScavengerServer -and $_.ScavengingEnabled 
+            }
+            
+            foreach ($server in $otherServers) {
+                if ($PSCmdlet.ShouldProcess($server.ServerName, "Disable Server Scavenging")) {
+                    try {
+                        $dnsParams = @{
+                            ComputerName = $server.ServerName
+                            ScavengingState = $false
+                            ErrorAction = 'Stop'
+                        }
+                        if ($Credential) { $dnsParams['Credential'] = $Credential }
+                        
+                        Set-DnsServerScavenging @dnsParams
+                        Write-Log "  ✓ $($server.ServerName) - Scavenging disabled (not master)" -Level SUCCESS
+                    }
+                    catch {
+                        Write-Log "  ✗ $($server.ServerName) - Failed to disable: $($_.Exception.Message)" -Level ERROR
+                    }
                 }
             }
+        }
+        else {
+            Write-Host "`n⚠️  WARNING: Other servers still have scavenging enabled!" -ForegroundColor Yellow
+            Write-Host "Consider using -DisableOtherServers to enforce single master scavenger" -ForegroundColor Yellow
         }
     }
     

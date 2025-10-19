@@ -28,18 +28,20 @@
 
 ## ⚡ Quick Start
 
-### Option 1: Use Your 3-Day Aggressive Cleanup
+### Option 1: Use Your 3-Day Aggressive Cleanup (PROPER WAY - Single Master Scavenger)
 
 ```powershell
 # Analyze current state
 .\DNS-ScavengingManager.ps1 -Mode Analyze
 
-# Apply 3+3 day scavenging (aggressive cleanup)
+# Apply 3+3 day scavenging with SINGLE master scavenger (Microsoft best practice)
 .\DNS-ScavengingManager.ps1 -Mode Configure `
     -NoRefreshInterval 3 `
     -RefreshInterval 3 `
     -ApplyToAllZones `
     -EnableServerScavenging `
+    -MasterScavengerServer "DC01" `
+    -DisableOtherServers `
     -WhatIf  # Preview first
 
 # Apply for real
@@ -48,8 +50,13 @@
     -RefreshInterval 3 `
     -ApplyToAllZones `
     -EnableServerScavenging `
+    -MasterScavengerServer "DC01" `
+    -DisableOtherServers `
     -Force
 ```
+
+**⚠️ CRITICAL:** Always use `-MasterScavengerServer` to designate ONLY ONE DNS server for scavenging!  
+**Why?** Multiple servers scavenging simultaneously causes race conditions and unpredictable behavior.
 
 ### Option 2: Use Microsoft Best Practice (7+7 days)
 
@@ -112,6 +119,45 @@
 # Example: 14+14 days (conservative)
 -NoRefreshInterval 14 -RefreshInterval 14
 ```
+
+---
+
+## ⚠️ CRITICAL: Microsoft Best Practice - Single Master Scavenger
+
+### Why Only ONE Server?
+
+**Microsoft strongly recommends enabling server scavenging on ONLY ONE DNS server.**
+
+#### The Problem with Multiple Scavengers:
+- **Race Conditions:** Multiple servers trying to delete the same records simultaneously
+- **Inconsistent Behavior:** Records evaluated at different times by different servers
+- **Unpredictable Results:** Timing conflicts can cause valid records to be deleted
+- **Resource Waste:** Multiple servers doing the same work
+
+#### The Solution:
+✅ **Designate ONE server as the "master scavenger"**  
+✅ **That ONE server scavenges ALL zones across the domain**  
+✅ **Disable scavenging on all other servers**  
+
+#### Recommended Master Scavenger:
+1. **PDC Emulator** (most common choice)
+2. Most reliable/available DNS server
+3. Server with best network connectivity
+
+#### How This Script Enforces Best Practice:
+
+```powershell
+# CORRECT: Single master scavenger
+.\DNS-ScavengingManager.ps1 -Mode Configure `
+    -EnableServerScavenging `
+    -MasterScavengerServer "DC01" `
+    -DisableOtherServers  # ← Disables scavenging on all other servers
+
+# WRONG: Enabling scavenging on all servers (old script behavior)
+# Don't do this! It violates Microsoft best practice!
+```
+
+**If you don't specify `-MasterScavengerServer`:** The script will prompt you to select one from a list.
 
 ---
 

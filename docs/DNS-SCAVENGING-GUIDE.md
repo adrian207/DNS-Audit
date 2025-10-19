@@ -25,7 +25,9 @@ This will show you:
 - Current scavenging intervals
 - Issues requiring attention
 
-### 2. Apply 3-Day Aggressive Scavenging (Your Request)
+### 2. Apply 3-Day Aggressive Scavenging (PROPER WAY with Single Master)
+
+**⚠️ CRITICAL:** Always specify a single master scavenger! Multiple servers scavenging simultaneously causes problems.
 
 ```powershell
 # Preview first (recommended)
@@ -34,6 +36,8 @@ This will show you:
     -RefreshInterval 3 `
     -ApplyToAllZones `
     -EnableServerScavenging `
+    -MasterScavengerServer "DC01" `
+    -DisableOtherServers `
     -WhatIf
 
 # Apply for real
@@ -42,8 +46,14 @@ This will show you:
     -RefreshInterval 3 `
     -ApplyToAllZones `
     -EnableServerScavenging `
+    -MasterScavengerServer "DC01" `
+    -DisableOtherServers `
     -Force
 ```
+
+**New Parameters:**
+- `-MasterScavengerServer "DC01"` - Designates DC01 as the ONLY server that scavenges
+- `-DisableOtherServers` - Automatically disables scavenging on all other servers
 
 ### 3. Apply Microsoft Best Practice (7+7 days)
 
@@ -54,6 +64,109 @@ This will show you:
     -ApplyToAllZones `
     -EnableServerScavenging
 ```
+
+---
+
+## ⚠️ CRITICAL: Microsoft Best Practice - Single Master Scavenger
+
+### Why This Matters
+
+**The #1 rule for DNS scavenging: Enable it on ONLY ONE DNS server!**
+
+This tool now enforces this Microsoft best practice automatically.
+
+### The Problem
+
+When multiple DNS servers have scavenging enabled simultaneously:
+
+❌ **Race Conditions**
+- Server A starts scavenging a zone at 2:00 AM
+- Server B starts scavenging the same zone at 2:01 AM
+- Both evaluate the same records at slightly different times
+- Conflicting decisions about what to delete
+
+❌ **Timing Conflicts**
+- Record is "just barely" eligible for deletion
+- Server A sees it as deletable
+- Server B sees it as still valid (1 minute difference)
+- Unpredictable which decision wins
+
+❌ **Resource Waste**
+- Multiple servers doing identical work
+- Unnecessary network traffic
+- Increased load on AD replication
+
+❌ **Troubleshooting Nightmare**
+- Which server deleted what?
+- Why did a record disappear?
+- How to prevent it from happening again?
+
+### The Solution
+
+✅ **ONE and ONLY ONE server should scavenge**
+- Typically the PDC Emulator
+- Or your most reliable DNS server
+- This ONE server scavenges ALL zones
+
+✅ **All other servers have scavenging DISABLED**
+- They still host DNS zones
+- They still answer queries
+- They just don't run scavenging
+
+### How This Script Implements It
+
+```powershell
+# The tool ENFORCES single master scavenger
+.\DNS-ScavengingManager.ps1 -Mode Configure `
+    -EnableServerScavenging `
+    -MasterScavengerServer "DC01" `      # ← Designate ONE server
+    -DisableOtherServers `               # ← Disable all others
+    -ApplyToAllZones
+
+# If you don't specify MasterScavengerServer, you'll be prompted:
+# "Select master scavenger (1-5) or press Enter to cancel"
+```
+
+### Analysis Mode Detects Violations
+
+When you run `-Mode Analyze`, the tool will WARN you:
+
+```
+SERVER SCAVENGING:
+  Enabled:  3
+  Disabled: 2
+
+  ⚠️  CRITICAL: Multiple servers have scavenging enabled!
+  Microsoft best practice: Enable scavenging on ONLY ONE server
+  Risk: Race conditions, inconsistent behavior, duplicate deletions
+
+  Servers with scavenging enabled:
+    • DC01
+    • DC02
+    • DC03
+
+  Recommendation: Use -MasterScavengerServer and -DisableOtherServers
+```
+
+### Recommended Master Scavenger
+
+**Choose ONE of these (in order of preference):**
+
+1. **PDC Emulator** (most common and recommended)
+   ```powershell
+   # Find your PDC Emulator
+   (Get-ADDomain).PDCEmulator
+   ```
+
+2. **Most reliable DNS server**
+   - Best uptime
+   - Fewest issues
+   - Good network connectivity
+
+3. **Dedicated infrastructure server**
+   - Not heavily loaded
+   - Not frequently rebooted
+   - Stable and well-monitored
 
 ---
 
