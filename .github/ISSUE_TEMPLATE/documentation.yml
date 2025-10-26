@@ -1,0 +1,66 @@
+name: 📚 Documentation Issue
+description: Report an issue with documentation
+title: "[Docs]: "
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve our documentation! Clear docs make all the difference.
+        
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: Documentation Type
+      description: Which type of documentation needs improvement?
+      options:
+        - README.md
+        - Quick Start Guide
+        - User Guide
+        - Deployment Guide
+        - Troubleshooting Guide
+        - Design Document
+        - Code Comments
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue Description
+      description: What's wrong with the documentation?
+      placeholder: "The documentation is unclear/missing/incorrect because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: Where is the issue? (file name, section, line number)
+      placeholder: "File: docs/USER-GUIDE.md, Section: Configuration, Line: 123"
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: How should this be improved?
+      placeholder: Suggest better wording, additional examples, or new sections...
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context or examples
+      placeholder: Add any other context here...
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you like to help?
+      options:
+        - label: I would be willing to submit a PR to fix this

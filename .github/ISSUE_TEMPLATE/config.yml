@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Ask a Question
+    url: https://github.com/adrian207/DNS-Audit/discussions
+    about: Ask questions and discuss with the community
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/adrian207/DNS-Audit/security/policy
+    about: Report security vulnerabilities privately (see SECURITY.md)
+  - name: 📖 Documentation
+    url: https://github.com/adrian207/DNS-Audit/tree/main/docs
+    about: Browse the complete documentation
