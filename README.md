@@ -72,6 +72,70 @@ explorer C:\DNSAudit
 - **PTR Auto-Fix**: Automatic creation of missing reverse zones and PTR records
 - **Scavenging Management**: Comprehensive DNS scavenging configuration and monitoring
 
+## Architecture
+
+DNS Master Audit uses a modular architecture to discover, query, analyze, and report on DNS infrastructure:
+
+```mermaid
+graph TB
+    subgraph "DNS Master Audit Core"
+        A[Main Script Engine]
+        A --> B[AD Discovery Module]
+        A --> C[DNS Query Engine]
+        A --> D[Analytics Engine]
+        A --> E[Report Generator]
+    end
+    
+    subgraph "Data Sources"
+        F[Domain Controllers]
+        G[DNS Servers]
+        H[DNS Zones & Records]
+    end
+    
+    subgraph "Analysis Capabilities"
+        I[Health Checks]
+        J[Security Audits]
+        K[PTR Validation]
+        L[Stale Record Detection]
+        M[Configuration Drift]
+    end
+    
+    subgraph "Output & Integration"
+        N[CSV/JSON/XML]
+        O[HTML Dashboard]
+        P[PDF Reports]
+        Q[Teams/Slack]
+        R[SIEM/Syslog]
+    end
+    
+    B --> F
+    C --> G
+    C --> H
+    
+    D --> I
+    D --> J
+    D --> K
+    D --> L
+    D --> M
+    
+    E --> N
+    E --> O
+    E --> P
+    E --> Q
+    E --> R
+    
+    style A fill:#0078D4,stroke:#005A9E,stroke-width:3px,color:#fff
+    style E fill:#107C10,stroke:#0E6A0E,stroke-width:2px,color:#fff
+    style D fill:#FF8C00,stroke:#CC7000,stroke-width:2px,color:#fff
+```
+
+**Key Components:**
+
+- **AD Discovery Module**: Discovers domain controllers via Active Directory queries
+- **DNS Query Engine**: Parallel processing for querying DNS servers and zones
+- **Analytics Engine**: Performs health checks, security audits, PTR validation, and drift detection
+- **Report Generator**: Creates multi-format reports and integrates with enterprise systems
+
 ## Documentation
 
 ### Getting Started (5 minutes)
