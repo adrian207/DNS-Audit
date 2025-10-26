@@ -1,103 +1,334 @@
-# DNS Master Audit - Enterprise Edition v3.2
+# DNS Master Audit
 
-<div align="center">
+> **Enterprise-grade DNS infrastructure auditing and management for Windows Active Directory environments**
 
-<img src="https://img.shields.io/badge/DNS-Master%20Audit-0078D4?style=for-the-badge&logo=microsoft&logoColor=white" alt="DNS Master Audit" />
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](CHANGELOG.md)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207.x-blue.svg?logo=powershell)](https://github.com/PowerShell/PowerShell)
+[![Platform](https://img.shields.io/badge/platform-Windows%20Server-0078D4.svg?logo=windows)](https://www.microsoft.com/windows-server)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Maintenance](https://img.shields.io/maintenance/yes/2025)](https://github.com/adrian207/DNS-Audit)
 
-### 🚀 Enterprise-Grade DNS Infrastructure Auditing & Management Platform
+## What It Does
 
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg?style=flat-square)](CHANGELOG.md)
-[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207.x-blue.svg?style=flat-square&logo=powershell)](https://github.com/PowerShell/PowerShell)
-[![Platform](https://img.shields.io/badge/platform-Windows%20Server-0078D4.svg?style=flat-square&logo=windows)](https://www.microsoft.com/windows-server)
-[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Production%20Ready-success.svg?style=flat-square)](https://github.com/adrian207/DNS-Audit-1)
+DNS Master Audit **automates DNS infrastructure health checks, security audits, and compliance reporting** for enterprises managing multiple domain controllers. It **reduces audit time from hours to minutes** through parallel processing while providing actionable insights through interactive dashboards and automated remediation scripts.
 
-[![GitHub stars](https://img.shields.io/github/stars/adrian207/DNS-Audit-1?style=social)](https://github.com/adrian207/DNS-Audit-1/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/adrian207/DNS-Audit-1?style=social)](https://github.com/adrian207/DNS-Audit-1/network/members)
-[![GitHub watchers](https://img.shields.io/github/watchers/adrian207/DNS-Audit-1?style=social)](https://github.com/adrian207/DNS-Audit-1/watchers)
+### Key Benefits
+
+1. **Save Time**: Parallel processing delivers 5-10x faster audits across 50+ domain controllers
+2. **Improve Security**: CIS Benchmark compliance audits, DNSSEC validation, and zone transfer security checks
+3. **Ensure Reliability**: Automated detection of stale records, duplicates, missing PTR records, and configuration drift
+
+## Quick Start
+
+```powershell
+# Download and run your first complete audit
+Invoke-WebRequest -Uri "https://github.com/adrian207/DNS-Audit/releases/latest/DNS-MasterAudit-Enhanced-v3.2.ps1" -OutFile "DNS-Audit.ps1"
+Unblock-File ".\DNS-Audit.ps1"
+
+# Run complete audit with interactive dashboard
+.\DNS-Audit.ps1 -Mode Complete -EnableHTMLDashboard -EnableParallelProcessing
+
+# View results
+explorer C:\DNSAudit
+```
+
+**Result**: Comprehensive DNS audit across your entire infrastructure with an interactive HTML dashboard in minutes.
+
+📖 **New to DNS Master Audit?** Start with the [Quick Start Guide](docs/QUICK-START-GUIDE.md) for step-by-step instructions.
+
+## Why DNS Master Audit?
+
+### Three Core Problems It Solves
+
+| Problem | Traditional Approach | DNS Master Audit Solution |
+|---------|---------------------|---------------------------|
+| **Manual audits are slow** | Hours spent running individual commands across DCs | Parallel processing engine completes audits in minutes |
+| **Security gaps go unnoticed** | No automated compliance checking | CIS Benchmark validation, DNSSEC audits, zone transfer security |
+| **DNS issues cause outages** | Reactive troubleshooting after problems occur | Proactive detection of stale records, duplicates, missing PTRs |
+
+### Who Uses It
+
+- **DNS Administrators**: Daily health checks and proactive maintenance
+- **Security Teams**: Compliance audits (CIS, NIST) and security posture validation
+- **IT Operations**: Automated reporting and change detection for SOPs
+- **Infrastructure Teams**: Capacity planning and performance optimization
+
+## Features
+
+### Essential Capabilities
+
+- **Multiple Audit Modes**: Inventory, health checks, record exports, zone analysis, security audits
+- **Interactive Dashboards**: Self-contained HTML reports with charts, tables, and drill-down capabilities
+- **Parallel Processing**: 5-10x performance improvement for large environments
+- **Multi-Format Export**: CSV, JSON, XML, HTML, Excel, PDF, Markdown
+- **Change Detection**: Baseline comparison and configuration drift reporting
+
+### Advanced Features
+
+- **Smart Analytics**: Stale record detection, duplicate IP detection, PTR validation
+- **Security Auditing**: DNSSEC validation, zone transfer checks, CIS Benchmark compliance
+- **Auto-Remediation**: Generate PowerShell scripts to fix detected issues
+- **Enterprise Integration**: Microsoft Teams, Slack webhooks, SIEM/Syslog integration
+- **PTR Auto-Fix**: Automatic creation of missing reverse zones and PTR records
+- **Scavenging Management**: Comprehensive DNS scavenging configuration and monitoring
+
+## Documentation
+
+### Getting Started (5 minutes)
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [Quick Start Guide](docs/QUICK-START-GUIDE.md) | Get running in 5 minutes | First-time users |
+| [User Guide](docs/USER-GUIDE.md) | Complete feature documentation | All users |
+| [Deployment Guide](docs/DEPLOYMENT-GUIDE.md) | Enterprise deployment patterns | IT Operations |
+
+### Advanced Topics
+
+- [Performance Tuning](docs/PERFORMANCE-TUNING.md) - Optimize for large environments
+- [Security Best Practices](SECURITY.md) - Secure deployment and hardening
+- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- [Design Document](docs/DESIGN-DOCUMENT.md) - Technical architecture (developers)
+
+### Feature-Specific Guides
+
+- [PTR Validation & Auto-Fix](PTR-VALIDATION-FEATURE.md) - Automatic reverse DNS management
+- [DNS Scavenging](DNS-SCAVENGING-README.md) - Scavenging configuration tool
+- [Testing Guide](Tests/README.md) - Running Pester tests
+
+📚 **Full Documentation**: Browse the [documentation hub](docs/README.md) for the complete guide library.
+
+## Installation
+
+### Prerequisites
+
+- Windows Server 2016+ or Windows 10/11
+- PowerShell 5.1+ (PowerShell 7.x recommended)
+- Active Directory and DNS Server PowerShell modules
+- Network access to domain controllers
+- Read access to DNS zones (DNS Administrators group recommended)
+
+### Install
+
+```powershell
+# Download latest release
+Invoke-WebRequest -Uri "https://github.com/adrian207/DNS-Audit/releases/latest/DNS-MasterAudit-Enhanced-v3.2.ps1" -OutFile "DNS-Audit.ps1"
+
+# Verify and unblock
+Get-FileHash ".\DNS-Audit.ps1" -Algorithm SHA256
+Unblock-File ".\DNS-Audit.ps1"
+
+# Verify prerequisites
+Get-Module -ListAvailable ActiveDirectory, DnsServer
+```
+
+### Verify Installation
+
+```powershell
+# Run basic inventory (read-only)
+.\DNS-Audit.ps1 -Mode Inventory
+
+# Check output
+Get-ChildItem C:\DNSAudit\
+```
+
+## Usage Examples
+
+### Basic Operations
+
+```powershell
+# Inventory all DNS servers
+.\DNS-Audit.ps1 -Mode Inventory
+
+# Health check across all DCs
+.\DNS-Audit.ps1 -Mode HealthCheck
+
+# Export all DNS records
+.\DNS-Audit.ps1 -Mode RecordExport
+
+# Analyze specific zone
+.\DNS-Audit.ps1 -Mode ZoneAnalysis -ZoneFilter "contoso.com"
+```
+
+### Advanced Scenarios
+
+```powershell
+# Complete security audit with dashboard
+.\DNS-Audit.ps1 -Mode Complete `
+    -EnableHTMLDashboard `
+    -EnableParallelProcessing `
+    -EnableSecurityAudits `
+    -EnableAdvancedAnalytics
+
+# Change detection vs baseline
+.\DNS-Audit.ps1 -Mode Complete `
+    -CompareToBaseline `
+    -BaselinePath "C:\DNSAudit\Baselines\baseline-2025-01.json"
+
+# Generate remediation scripts
+.\DNS-Audit.ps1 -Mode Complete `
+    -EnableAdvancedAnalytics `
+    -GenerateRemediationScript
+
+# Enterprise deployment with notifications
+.\DNS-Audit.ps1 -Mode Complete `
+    -EnableHTMLDashboard `
+    -EnableParallelProcessing `
+    -TeamsWebhook "https://outlook.office.com/webhook/..." `
+    -SyslogServer "siem.contoso.com" `
+    -ConfigFile "C:\DNSAudit\Configs\production.json"
+```
+
+### PTR Management
+
+```powershell
+# Detect missing reverse zones and PTR records
+.\DNS-Audit.ps1 -Mode Complete -EnableAdvancedAnalytics
+
+# Auto-create missing infrastructure (preview)
+.\DNS-Audit.ps1 -Mode Complete -EnableAdvancedAnalytics -AutoFix -WhatIf
+
+# Auto-create for real
+.\DNS-Audit.ps1 -Mode Complete -EnableAdvancedAnalytics -AutoFix
+```
+
+### Scavenging Management
+
+```powershell
+# Analyze current scavenging configuration
+.\DNS-ScavengingManager.ps1 -Mode Analyze
+
+# Configure aggressive scavenging (3+3 days, single master)
+.\DNS-ScavengingManager.ps1 -Mode Configure `
+    -NoRefreshInterval 3 `
+    -RefreshInterval 3 `
+    -ApplyToAllZones `
+    -MasterScavengerServer "DC01" `
+    -DisableOtherServers
+```
+
+## Configuration
+
+### Configuration File Support
+
+Create `audit-config.json` for consistent deployments:
+
+```json
+{
+  "Mode": "Complete",
+  "EnableHTMLDashboard": true,
+  "EnableParallelProcessing": true,
+  "MaxDegreeOfParallelism": 10,
+  "EnableAdvancedAnalytics": true,
+  "EnableSecurityAudits": true,
+  "ExportFormat": "All",
+  "OutputPath": "C:\\DNSAudit",
+  "TeamsWebhook": "https://outlook.office.com/webhook/...",
+  "SyslogServer": "siem.contoso.com"
+}
+```
+
+```powershell
+.\DNS-Audit.ps1 -ConfigFile ".\audit-config.json"
+```
+
+### Environment Variables
+
+```powershell
+# Set default output path
+$env:DNS_AUDIT_OUTPUT = "D:\Reports\DNS"
+
+# Set default log level
+$env:DNS_AUDIT_LOGLEVEL = "Verbose"
+```
+
+## Performance
+
+| Environment Size | Domain Controllers | Typical Runtime | With Parallel Processing |
+|-----------------|-------------------|-----------------|-------------------------|
+| Small (1-10 DCs) | 1-10 | 5-10 minutes | 2-3 minutes |
+| Medium (11-25 DCs) | 11-25 | 15-30 minutes | 5-8 minutes |
+| Large (26-50 DCs) | 26-50 | 30-60 minutes | 8-15 minutes |
+| Enterprise (50+ DCs) | 50+ | 60+ minutes | 15-30 minutes |
+
+**Optimization Tips**: See [Performance Tuning Guide](docs/PERFORMANCE-TUNING.md) for detailed recommendations.
+
+## Contributing
+
+We welcome contributions! Whether it's bug reports, feature requests, or code contributions, please see our [Contributing Guide](CONTRIBUTING.md).
+
+### How to Contribute
+
+1. **Report Issues**: Use [GitHub Issues](https://github.com/adrian207/DNS-Audit/issues) for bug reports and feature requests
+2. **Submit Pull Requests**: Follow our [PR template](.github/PULL_REQUEST_TEMPLATE.md)
+3. **Improve Documentation**: Documentation PRs are always welcome
+4. **Share Feedback**: Let us know how you're using DNS Master Audit
+
+### Development Setup
+
+```powershell
+# Clone repository
+git clone https://github.com/adrian207/DNS-Audit.git
+cd DNS-Audit
+
+# Install development dependencies
+Install-Module -Name Pester -MinimumVersion 5.0 -Scope CurrentUser
+Install-Module -Name PSScriptAnalyzer -Scope CurrentUser
+
+# Run tests
+Invoke-Pester -Path .\Tests\
+
+# Run linting
+Invoke-ScriptAnalyzer -Path .\DNS-MasterAudit.ps1 -Settings .\PSScriptAnalyzerSettings.psd1
+```
+
+## Security
+
+Security is a top priority. Please see our [Security Policy](SECURITY.md) for:
+
+- Reporting vulnerabilities (email: adrian207@gmail.com)
+- Supported versions
+- Security best practices
+- Credential management guidelines
+
+**Never commit credentials or sensitive data to this repository.**
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+### Getting Help
+
+- 📖 **Documentation**: Check the [docs](docs/) folder first
+- � **Bug Reports**: [GitHub Issues](https://github.com/adrian207/DNS-Audit/issues)
+- 💡 **Feature Requests**: [GitHub Issues](https://github.com/adrian207/DNS-Audit/issues)
+- 📧 **Email**: adrian207@gmail.com
+
+### Community
+
+- ⭐ Star this repo if it's helpful
+- 🔀 Fork and contribute improvements
+- 📢 Share with colleagues in AD/DNS administration
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
+
+## Acknowledgments
+
+Built with ❤️ for the Windows Server and Active Directory community.
+
+Special thanks to:
+- Microsoft DNS Server team for comprehensive PowerShell modules
+- PowerShell community for testing and feedback
+- Enterprise users who provided real-world requirements
 
 ---
 
-### 🎯 Features at a Glance
-
-[![CIS Compliance](https://img.shields.io/badge/CIS-Benchmark%20v3.0.0-orange.svg?style=flat-square&logo=security)](docs/USER-GUIDE.md)
-[![DNSSEC](https://img.shields.io/badge/DNSSEC-Supported-green.svg?style=flat-square&logo=dns)](docs/USER-GUIDE.md)
-[![Parallel Processing](https://img.shields.io/badge/Processing-Parallel%20(5--10x)-brightgreen.svg?style=flat-square&logo=fastly)](docs/PERFORMANCE-TUNING.md)
-[![HTML Dashboard](https://img.shields.io/badge/Dashboard-Interactive%20HTML-blueviolet.svg?style=flat-square&logo=html5)](docs/USER-GUIDE.md)
-[![Teams Integration](https://img.shields.io/badge/Teams-Webhook-purple.svg?style=flat-square&logo=microsoftteams)](docs/DEPLOYMENT-GUIDE.md)
-[![SIEM Ready](https://img.shields.io/badge/SIEM-Syslog%20RFC5424-red.svg?style=flat-square&logo=splunk)](docs/DEPLOYMENT-GUIDE.md)
-
-### 📦 Export Formats
-
-![CSV](https://img.shields.io/badge/CSV-✓-success.svg?style=flat-square)
-![JSON](https://img.shields.io/badge/JSON-✓-success.svg?style=flat-square)
-![XML](https://img.shields.io/badge/XML-✓-success.svg?style=flat-square)
-![HTML](https://img.shields.io/badge/HTML-✓-success.svg?style=flat-square)
-![Excel](https://img.shields.io/badge/Excel-✓-success.svg?style=flat-square)
-![PDF](https://img.shields.io/badge/PDF-✓-success.svg?style=flat-square)
-![Markdown](https://img.shields.io/badge/Markdown-✓-success.svg?style=flat-square)
-
-### 🔗 Quick Links
-
-[Features](#-features) •
-[Quick Start](#-quick-start) •
-[Documentation](#-documentation) •
-[Installation](#-installation) •
-[Examples](#-examples) •
-[Performance](#-performance) •
-[Security](#-security) •
-[Support](#-support) •
-[Contributing](#-contributing)
-
----
-
-### 📊 Project Stats
-
-![Code Size](https://img.shields.io/github/languages/code-size/adrian207/DNS-Audit-1?style=flat-square)
-![Repo Size](https://img.shields.io/github/repo-size/adrian207/DNS-Audit-1?style=flat-square)
-![Lines of Code](https://img.shields.io/tokei/lines/github/adrian207/DNS-Audit-1?style=flat-square)
-![Last Commit](https://img.shields.io/github/last-commit/adrian207/DNS-Audit-1?style=flat-square)
-![Commits](https://img.shields.io/github/commit-activity/m/adrian207/DNS-Audit-1?style=flat-square)
-
-### 💻 Compatibility
-
-![Windows Server 2016+](https://img.shields.io/badge/Windows%20Server-2016%20%7C%202019%20%7C%202022-0078D4.svg?style=flat-square&logo=windows)
-![Active Directory](https://img.shields.io/badge/Active%20Directory-Required-blue.svg?style=flat-square&logo=microsoft)
-![DNS Server](https://img.shields.io/badge/DNS%20Server-Microsoft-green.svg?style=flat-square)
-
-### 👨‍💻 Maintained By
-
-[![Author](https://img.shields.io/badge/Author-Adrian%20Johnson-brightgreen.svg?style=flat-square)](mailto:adrian207@gmail.com)
-![Maintenance](https://img.shields.io/maintenance/yes/2025?style=flat-square)
-![Activity](https://img.shields.io/github/commit-activity/y/adrian207/DNS-Audit-1?style=flat-square)
-
-</div>
-
----
-
-## 📋 Overview
-
-**DNS Master Audit v3.2** is a comprehensive PowerShell-based DNS auditing platform designed for enterprise environments. It provides deep insights into DNS infrastructure health, security posture, and configuration drift with interactive reporting and automated remediation capabilities.
-
-### 🎯 Why DNS Master Audit?
-
-<table>
-<tr>
-<td width="33%" align="center">
-<h3>🚀 Performance</h3>
-<b>5-10x Faster</b><br/>
-Parallel processing engine<br/>
-Handles 50+ domain controllers<br/>
-Minutes instead of hours
-</td>
-<td width="33%" align="center">
-<h3>🔐 Security</h3>
-<b>CIS Benchmark v3.0</b><br/>
-DNSSEC validation<br/>
-Zone transfer audits<br/>
-Compliance reporting
-</td>
-<td width="33%" align="center">
+**Maintained by**: Adrian Johnson (adrian207@gmail.com)  
+**Latest Version**: v3.2.0  
+**Last Updated**: October 2025
 <h3>📊 Intelligence</h3>
 <b>Advanced Analytics</b><br/>
 Stale record detection<br/>

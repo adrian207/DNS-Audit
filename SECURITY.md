@@ -1,103 +1,324 @@
 # Security Policy
 
-## Supported Versions
-
-We release patches for security vulnerabilities in the following versions:
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.5.x   | :white_check_mark: |
-| 2.2.x   | :white_check_mark: |
-| 2.1.x   | :white_check_mark: |
-| 2.0.x   | :white_check_mark: |
-| < 2.0   | :x:                |
-
----
+> **Security is critical.** We take security vulnerabilities seriously and respond quickly to reports.
 
 ## Reporting a Vulnerability
 
-We take the security of DNS Master Audit seriously. If you believe you have found a security vulnerability, please report it to us as described below.
+### How to Report (DO THIS FIRST)
 
-### 📧 **How to Report**
+**Found a security issue?** Report it privately to:
 
-**Please DO NOT report security vulnerabilities through public GitHub issues.**
+📧 **adrian207@gmail.com**
 
-Instead, please email security reports to:
+**Subject**: `[SECURITY] DNS-Audit Vulnerability Report`
 
-**📬 adrian207@gmail.com**
+**⚠️ DO NOT report security vulnerabilities through public GitHub issues.**
 
-**Subject Line:** `[SECURITY] DNS-Audit Vulnerability Report`
+### What to Include
 
-### 📝 **What to Include**
+Please provide as much detail as possible:
 
-Please include as much of the following information as possible:
+1. **Vulnerability type** (e.g., credential exposure, command injection, privilege escalation)
+2. **Affected files/components** with specific line numbers if possible
+3. **Reproduction steps** - detailed instructions to reproduce the issue
+4. **Proof of concept** - code or commands demonstrating the vulnerability
+5. **Impact assessment** - what an attacker could do with this vulnerability
+6. **Suggested fix** (optional but appreciated)
+7. **Your contact information** for follow-up questions
 
-1. **Type of issue** (e.g., credential exposure, command injection, path traversal, etc.)
-2. **Full paths** of source file(s) related to the manifestation of the issue
-3. **Location** of the affected source code (tag/branch/commit or direct URL)
-4. **Step-by-step instructions** to reproduce the issue
-5. **Proof-of-concept or exploit code** (if possible)
-6. **Impact** of the issue, including how an attacker might exploit it
-7. **Your contact information** (name, email, GitHub username)
+### Response Timeline
 
-### ⏱️ **Response Timeline**
+| Stage | Timeline |
+|-------|----------|
+| **Initial acknowledgment** | Within 48 hours |
+| **Detailed response** | Within 7 days |
+| **Fix deployment** | Depends on severity (see below) |
 
-- **Initial Response:** Within 48 hours
-- **Status Update:** Within 7 days
-- **Fix Timeline:** Depends on severity (see below)
+### Fix Timeline by Severity
 
-| Severity | Fix Timeline | Disclosure |
-|----------|--------------|------------|
-| **Critical** | 1-3 days | Coordinated after patch |
-| **High** | 1-2 weeks | Coordinated after patch |
-| **Medium** | 2-4 weeks | Coordinated after patch |
-| **Low** | Next release | Standard release notes |
+| Severity | Description | Fix Target | Example |
+|----------|-------------|------------|---------|
+| **Critical** | Remote code execution, privilege escalation | 1-3 days | Command injection in remote execution |
+| **High** | Authentication bypass, credential exposure | 1-2 weeks | Hardcoded credentials, insecure storage |
+| **Medium** | Information disclosure, DoS | 2-4 weeks | Excessive logging of sensitive data |
+| **Low** | Minor security issues | Next release | Missing input validation (low impact) |
 
-### 🏆 **Recognition**
+## Supported Versions
 
-We appreciate your efforts to responsibly disclose your findings. Contributors who report valid security issues will be:
+We provide security updates for the following versions:
 
-- Acknowledged in the CHANGELOG (with permission)
-- Listed in the SECURITY-HALL-OF-FAME.md (optional)
-- Invited to collaborate on the fix (optional)
+| Version | Status | Support |
+|---------|--------|---------|
+| 3.2.x | ✅ **Current** | Full support |
+| 3.0.x - 3.1.x | ✅ Supported | Security fixes only |
+| 2.5.x - 2.9.x | ✅ Supported | Critical fixes only |
+| 2.0.x - 2.4.x | ⚠️ Limited | Critical issues only |
+| < 2.0 | ❌ Unsupported | Please upgrade |
 
----
+**Recommendation**: Always use the latest version for best security and features.
 
 ## Security Best Practices
 
-### 🔐 **For Users**
+### For Users and Administrators
 
-When using DNS Master Audit in production environments:
+#### 1. Credential Management
 
-1. **Credentials**
-   - Use dedicated service accounts with minimum required permissions
-   - Never hardcode credentials in scripts
-   - Consider using Windows Credential Manager integration
-   - Rotate credentials regularly
+**Do:**
+- ✅ Use dedicated service accounts with minimum required permissions
+- ✅ Use Windows Credential Manager for storing credentials
+- ✅ Rotate credentials regularly (every 90 days)
+- ✅ Use `Get-Credential` for interactive sessions
+- ✅ Consider Azure Key Vault for enterprise deployments
 
-2. **Network Security**
-   - Run audits from secure management VLANs
-   - Use firewall rules to restrict DC access
-   - Enable SMB signing and encryption
-   - Use HTTPS webhooks only (Teams, Slack)
+**Don't:**
+- ❌ Never hardcode credentials in scripts
+- ❌ Never commit credentials to version control
+- ❌ Never share credentials in documentation or logs
+- ❌ Never use Domain Admin unless absolutely necessary
 
-3. **Data Protection**
-   - Enable `-RedactSensitiveData` for shared reports
-   - Restrict access to export directories
-   - Use encrypted storage for baseline files
-   - Review logs before sharing externally
+**Example - Secure credential usage:**
 
-4. **Execution**
-   - Validate script integrity before execution
-   - Use code signing when possible
-   - Run with least privilege (no Domain Admin required for audits)
-   - Enable PowerShell constrained language mode if needed
+```powershell
+# Good: Use Credential Manager
+$cred = Get-StoredCredential -Target "DNS-Audit-Service"
 
-5. **Updates**
-   - Keep PowerShell updated (5.1+ or 7.x)
-   - Apply Windows updates regularly
-   - Update RSAT modules monthly
-   - Check for script updates weekly
+# Good: Interactive prompt
+$cred = Get-Credential -Message "Enter DNS Administrator credentials"
+
+# Good: Use least-privilege account
+.\DNS-Audit.ps1 -Mode Complete -Credential $cred
+
+# Bad: Hardcoded (NEVER DO THIS)
+$password = ConvertTo-SecureString "P@ssw0rd" -AsPlainText -Force  # ❌ NEVER
+```
+
+#### 2. Execution Security
+
+**Do:**
+- ✅ Validate script integrity before execution
+- ✅ Use code signing when possible
+- ✅ Run from secure, restricted directories
+- ✅ Enable PowerShell logging and auditing
+- ✅ Use PowerShell execution policy appropriately
+- ✅ Run with least privilege (DNS Admins read-only, not Domain Admin)
+
+**Don't:**
+- ❌ Don't run unknown scripts as Administrator
+- ❌ Don't disable execution policy globally
+- ❌ Don't bypass security warnings without verification
+
+**Example - Secure execution:**
+
+```powershell
+# Verify script integrity
+Get-FileHash .\DNS-Audit.ps1 -Algorithm SHA256
+Get-AuthenticodeSignature .\DNS-Audit.ps1
+
+# Unblock after verification
+Unblock-File .\DNS-Audit.ps1
+
+# Run with appropriate permissions (not Domain Admin)
+.\DNS-Audit.ps1 -Mode Complete -Credential $dnsReadOnlyCred
+```
+
+#### 3. Network Security
+
+**Do:**
+- ✅ Run audits from secure management VLANs
+- ✅ Use firewall rules to restrict DC access
+- ✅ Enable SMB signing and encryption
+- ✅ Use HTTPS webhooks only (Teams, Slack)
+- ✅ Restrict DNS query sources if possible
+- ✅ Use IPsec for DC communication if required
+
+**Firewall rules needed:**
+
+```powershell
+# DNS Queries
+New-NetFirewallRule -DisplayName "DNS Audit - DNS" -Direction Outbound -Protocol UDP -RemotePort 53
+
+# WinRM (if using remote PowerShell)
+New-NetFirewallRule -DisplayName "DNS Audit - WinRM" -Direction Outbound -Protocol TCP -RemotePort 5985,5986
+
+# LDAP (for AD queries)
+New-NetFirewallRule -DisplayName "DNS Audit - LDAP" -Direction Outbound -Protocol TCP -RemotePort 389,636
+```
+
+#### 4. Data Protection
+
+**Do:**
+- ✅ Redact sensitive data in shared reports
+- ✅ Encrypt export files if containing sensitive data
+- ✅ Restrict access to output directories
+- ✅ Use secure storage for baseline files
+- ✅ Review logs before sharing externally
+- ✅ Delete old exports and logs regularly
+
+**Example - Secure data handling:**
+
+```powershell
+# Use redaction for shared reports
+.\DNS-Audit.ps1 -Mode Complete -RedactSensitiveData
+
+# Encrypt sensitive exports
+$exports = Get-ChildItem C:\DNSAudit\*.csv
+$exports | ForEach-Object {
+    Protect-CmsMessage -To "CN=DNSAuditRecipient" -Path $_.FullName -OutFile "$($_.FullName).encrypted"
+    Remove-Item $_.FullName -Force
+}
+
+# Set restrictive permissions
+$acl = Get-Acl C:\DNSAudit
+$acl.SetAccessRuleProtection($true, $false)
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+    "DOMAIN\DNS-Admins", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow"
+)))
+Set-Acl C:\DNSAudit $acl
+```
+
+#### 5. Integration Security
+
+**Do:**
+- ✅ Use webhook secrets/tokens when available
+- ✅ Validate SSL/TLS certificates
+- ✅ Use HTTPS for all webhook endpoints
+- ✅ Rotate webhook URLs periodically
+- ✅ Monitor webhook activity for anomalies
+- ✅ Use SIEM integration with TLS
+
+**Example - Secure webhook usage:**
+
+```powershell
+# Store webhook URL securely (not in script)
+$webhookUrl = Get-Content C:\SecureConfig\teams-webhook.txt -Raw
+
+# Use HTTPS only
+if ($webhookUrl -notmatch '^https://') {
+    Write-Error "Only HTTPS webhooks allowed"
+    exit 1
+}
+
+.\DNS-Audit.ps1 -Mode Complete -TeamsWebhook $webhookUrl
+```
+
+#### 6. Logging and Auditing
+
+**Do:**
+- ✅ Enable PowerShell transcription logging
+- ✅ Enable script block logging for PowerShell
+- ✅ Review audit logs regularly
+- ✅ Forward logs to SIEM
+- ✅ Monitor for suspicious activity
+- ✅ Retain logs per compliance requirements
+
+**Example - Enable logging:**
+
+```powershell
+# Enable PowerShell logging (via GPO recommended)
+# HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription
+Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription" `
+    -Name "EnableTranscripting" -Value 1
+
+# Enable script block logging
+Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" `
+    -Name "EnableScriptBlockLogging" -Value 1
+```
+
+### For Developers
+
+If you're modifying or extending DNS Master Audit:
+
+**Do:**
+- ✅ Validate all user input
+- ✅ Use parameterized queries for any database operations
+- ✅ Sanitize file paths to prevent path traversal
+- ✅ Handle errors securely (don't expose sensitive info)
+- ✅ Use `ConvertTo-SecureString` for passwords
+- ✅ Review code for injection vulnerabilities
+- ✅ Test with PSScriptAnalyzer security rules
+
+**Don't:**
+- ❌ Never use `Invoke-Expression` with user input
+- ❌ Never construct commands from untrusted input
+- ❌ Never log credentials or sensitive data
+- ❌ Never trust user input without validation
+
+**Example - Secure coding:**
+
+```powershell
+# Bad: Command injection vulnerability
+$zoneName = $UserInput
+Invoke-Expression "Get-DnsServerZone -Name $zoneName"  # ❌ DANGEROUS
+
+# Good: Parameterized and validated
+$zoneName = $UserInput
+if ($zoneName -notmatch '^[a-zA-Z0-9.-]+$') {
+    throw "Invalid zone name format"
+}
+Get-DnsServerZone -Name $zoneName  # ✅ SAFE
+```
+
+## Known Security Considerations
+
+### Current Security Features
+
+✅ **Read-only by default**: Audit modes don't modify DNS
+✅ **WhatIf support**: Preview changes before applying
+✅ **Credential isolation**: Never stores credentials
+✅ **Audit logging**: All operations logged
+✅ **Input validation**: Parameters validated before use
+✅ **Error handling**: Secure error messages without info disclosure
+
+### Potential Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| **Credential exposure in logs** | High | Logs are sanitized, use `-Verbose` carefully |
+| **Unauthorized access to exports** | Medium | Set restrictive NTFS permissions on output directories |
+| **DNS query visibility** | Low | Use encrypted channels (DNSSEC, IPsec) if required |
+| **Webhook URL exposure** | Medium | Store in secure configuration, use secrets management |
+| **Audit data exfiltration** | Medium | Monitor network traffic, use DLP tools |
+
+## Security Testing
+
+We regularly perform:
+
+- **Static code analysis** with PSScriptAnalyzer
+- **Dependency scanning** for PowerShell modules
+- **Manual security reviews** of critical functions
+- **Community security feedback** integration
+
+**Want to help?** Run security analysis:
+
+```powershell
+# Run PSScriptAnalyzer with security rules
+Invoke-ScriptAnalyzer -Path .\DNS-Audit.ps1 -Settings .\PSScriptAnalyzerSettings.psd1 -Severity Error,Warning
+
+# Review for common vulnerabilities
+Select-String -Path .\DNS-Audit.ps1 -Pattern "Invoke-Expression|ConvertTo-SecureString -AsPlainText|Write-Verbose \$cred"
+```
+
+## Recognition
+
+We appreciate responsible disclosure. Security researchers who report valid vulnerabilities will be:
+
+- ✅ Acknowledged in [CHANGELOG.md](CHANGELOG.md) (with permission)
+- ✅ Credited in release notes
+- ✅ Invited to collaborate on the fix (optional)
+- ✅ Added to our Security Hall of Fame (optional)
+
+**Hall of Fame** (security researchers who have helped):
+- *No vulnerabilities reported yet - help us improve security!*
+
+## Contact
+
+**Security issues**: adrian207@gmail.com  
+**General support**: [GitHub Issues](https://github.com/adrian207/DNS-Audit/issues)
+
+---
+
+**Last reviewed**: October 26, 2025  
+**Policy version**: 1.1
 
 ### 🛡️ **For Developers**
 
